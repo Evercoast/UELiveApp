@@ -1,0 +1,30 @@
+{
+    "FileVersion": 3,
+    "Version": 410,
+    "VersionName": "0.4.1",
+    "FriendlyName": "EvercoastRealtime",
+    "Description": "Evercoast realtime broadcast plugin.",
+    "Category": "Other",
+    "CreatedBy": "Evercoast Inc.",
+    "CreatedByURL": "https://evercoast.com/",
+    "DocsURL": "",
+    "MarketplaceURL": "",
+    "SupportURL": "",
+    "CanContainContent": true,
+    "IsBetaVersion": true,
+    "IsExperimentalVersion": false,
+    "Installed": false,
+    "Modules": [
+        {
+            "Name": "EvercoastRealtime",
+            "Type": "Runtime",
+            "LoadingPhase": "Default"
+        }
+    ],
+    "Plugins": [
+        {
+            "Name": "EvercoastPlayback",
+            "Enabled": true
+        }
+    ]
+}

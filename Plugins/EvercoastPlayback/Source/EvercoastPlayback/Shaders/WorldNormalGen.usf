@@ -1,0 +1,67 @@
+// WorldNormalGen.usf
+
+#include "/Engine/Public/Platform.ush"
+#include "/Engine/Private/Common.ush"
+
+float4x4 ObjectToCamera;
+float4x4 ObjectToProjection;
+
+void MainVS(
+	in float3 InPosition : ATTRIBUTE0,
+	out float4 OutPosition : SV_POSITION,
+	out float4 OutPositionCS: TEXCOORD0)
+{
+	OutPositionCS = mul(float4(InPosition, 1.0), ObjectToCamera);
+	OutPosition = mul(float4(InPosition, 1.0), ObjectToProjection);
+}
+
+float4x4 CameraToWorld;
+void MainPS(
+	in float4 SvPosition : SV_POSITION, // <- why this is important to get other attributes streamed in???
+	in noperspective float4 InPositionCS: TEXCOORD0,
+	out float4 OutColor : SV_Target0
+	)
+{
+	float3 Normal_Cam = cross(normalize(ddx(InPositionCS).xyz), normalize(ddy(InPositionCS).xyz));
+	float3 Normal_World = mul(Normal_Cam, (float3x3)CameraToWorld);
+
+
+	OutColor = float4(Normal_World.xyz, 1.0);
+}
+
+
+float3 Evercoast_Bounds_Min;
+float Evercoast_Bounds_Dim;
+float Evercoast_Position_Rescale;
+float Evercoast_ToUnrealUnit;
+Texture2D<uint2> Evercoast_Positions;
+
+
+void MainVoxelVS(
+	in float4 InPosition	: ATTRIBUTE0,
+	in uint InstanceId		: SV_InstanceID,
+	out float4 OutPosition	: SV_POSITION,
+	out float4 OutPositionCS: TEXCOORD0
+	)
+{
+	int2 packedCoord = (int2)(Evercoast_Positions.Load(int3(InstanceId % 2048, InstanceId / 2048, 0)).xy);
+	float3 coords = float3(packedCoord.x & 0xffff, packedCoord.x >> 16, packedCoord.y & 0xffff);
+	float3 vertex = Evercoast_Bounds_Min + Evercoast_Position_Rescale * (coords + InPosition.xyz) * Evercoast_Bounds_Dim;
+	vertex = vertex * Evercoast_ToUnrealUnit;
+
+	OutPositionCS = mul(float4(vertex.xzy, 1.0), ObjectToCamera);
+	OutPosition = mul(float4(vertex.xzy, 1.0), ObjectToProjection);
+}
+
+// FIXME: duplication of MainPS()
+void MainVoxelPS(
+	in float4 SvPosition : SV_POSITION, // <- why this is important to get other attributes streamed in???
+	in noperspective float4 InPositionCS: TEXCOORD0,
+	out float4 OutColor : SV_Target0
+	)
+{
+	float3 Normal_Cam = cross(normalize(ddx(InPositionCS).xyz), normalize(ddy(InPositionCS).xyz));
+	float3 Normal_World = mul(Normal_Cam, (float3x3)CameraToWorld);
+
+	OutColor = float4(Normal_World.xyz, 1.0);
+}

@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--Evercoast mobile plugin additions-->
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+	<resourceCopies>
+		<isArch arch="armeabi-v7a">
+    	<log text="Copying libreading.so"/>
+			<copyFile src="$S(PluginDir)/../ThirdParty/GhostTree/lib/Android/armeabi-v7a/libreading.so"
+						dst="$S(BuildDir)/libs/armeabi-v7a/libreading.so" />
+
+    	<log text="Copying libdecoding.so"/>
+			<copyFile src="$S(PluginDir)/../ThirdParty/GhostTree/lib/Android/armeabi-v7a/libdecoding.so"
+            			dst="$S(BuildDir)/libs/armeabi-v7a/libdecoding.so" />
+
+      <log text="Copying libcortocodec.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/corto/lib/Android/armeabi-v7a/libcortocodec_unity.so"
+            			dst="$S(BuildDir)/libs/armeabi-v7a/libcortocodec_unity.so" />
+
+      <log text="Copying libwebpdecoder.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/libwebp/lib/Android/armeabi-v7a/libwebpdecoder.so"
+            			dst="$S(BuildDir)/libs/armeabi-v7a/libwebpdecoder.so" />
+
+      <log text="Copying libavcodec.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/ffmpeg/lib/Android/armeabi-v7a/libavcodec.so"
+            			dst="$S(BuildDir)/libs/armeabi-v7a/libavcodec.so" />
+
+      <log text="Copying libavdevice.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/ffmpeg/lib/Android/armeabi-v7a/libavdevice.so"
+            			dst="$S(BuildDir)/libs/armeabi-v7a/libavdevice.so" />
+
+      <log text="Copying libavfilter.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/ffmpeg/lib/Android/armeabi-v7a/libavfilter.so"
+            			dst="$S(BuildDir)/libs/armeabi-v7a/libavfilter.so" />
+
+      <log text="Copying libavformat.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/ffmpeg/lib/Android/armeabi-v7a/libavformat.so"
+            			dst="$S(BuildDir)/libs/armeabi-v7a/libavformat.so" />
+
+      <log text="Copying libavutil.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/ffmpeg/lib/Android/armeabi-v7a/libavutil.so"
+            			dst="$S(BuildDir)/libs/armeabi-v7a/libavutil.so" />
+
+      <log text="Copying libswresample.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/ffmpeg/lib/Android/armeabi-v7a/libswresample.so"
+            			dst="$S(BuildDir)/libs/armeabi-v7a/libswresample.so" />
+
+      <log text="Copying libswscale.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/ffmpeg/lib/Android/armeabi-v7a/libswscale.so"
+            			dst="$S(BuildDir)/libs/armeabi-v7a/libswscale.so" />
+      
+		</isArch>
+        
+    <isArch arch="arm64-v8a">
+      <log text="Copying libreading.so"/>
+			<copyFile src="$S(PluginDir)/../ThirdParty/GhostTree/lib/Android/arm64-v8a/libreading.so"
+						dst="$S(BuildDir)/libs/arm64-v8a/libreading.so" />
+
+    	<log text="Copying libdecoding.so"/>
+			<copyFile src="$S(PluginDir)/../ThirdParty/GhostTree/lib/Android/arm64-v8a/libdecoding.so"
+            			dst="$S(BuildDir)/libs/arm64-v8a/libdecoding.so" />
+
+      <log text="Copying libcortocodec.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/corto/lib/Android/arm64-v8a/libcortocodec_unity.so"
+            			dst="$S(BuildDir)/libs/arm64-v8a/libcortocodec_unity.so" />
+
+      <log text="Copying libwebpdecoder.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/libwebp/lib/Android/arm64-v8a/libwebpdecoder.so"
+            			dst="$S(BuildDir)/libs/arm64-v8a/libwebpdecoder.so" />
+
+      <log text="Copying libavcodec.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/ffmpeg/lib/Android/arm64-v8a/libavcodec.so"
+            			dst="$S(BuildDir)/libs/arm64-v8a/libavcodec.so" />
+
+      <log text="Copying libavdevice.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/ffmpeg/lib/Android/arm64-v8a/libavdevice.so"
+            			dst="$S(BuildDir)/libs/arm64-v8a/libavdevice.so" />
+
+      <log text="Copying libavfilter.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/ffmpeg/lib/Android/arm64-v8a/libavfilter.so"
+            			dst="$S(BuildDir)/libs/arm64-v8a/libavfilter.so" />
+
+      <log text="Copying libavformat.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/ffmpeg/lib/Android/arm64-v8a/libavformat.so"
+            			dst="$S(BuildDir)/libs/arm64-v8a/libavformat.so" />
+
+      <log text="Copying libavutil.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/ffmpeg/lib/Android/arm64-v8a/libavutil.so"
+            			dst="$S(BuildDir)/libs/arm64-v8a/libavutil.so" />
+
+      <log text="Copying libswresample.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/ffmpeg/lib/Android/arm64-v8a/libswresample.so"
+            			dst="$S(BuildDir)/libs/arm64-v8a/libswresample.so" />
+      
+      <log text="Copying libswscale.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/ffmpeg/lib/Android/arm64-v8a/libswscale.so"
+            			dst="$S(BuildDir)/libs/arm64-v8a/libswscale.so" />
+		</isArch>
+
+	</resourceCopies>
+</root>

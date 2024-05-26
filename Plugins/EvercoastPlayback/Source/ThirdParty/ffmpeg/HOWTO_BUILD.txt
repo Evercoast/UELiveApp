@@ -1,0 +1,45 @@
+# For Linux, mainly from https://trac.ffmpeg.org/wiki/CompilationGuide/Ubuntu
+# but removed libx264 and GPL libraries, build shared libraries only
+
+export PKG_CONFIG_PATH=~/Projects/ffmpeg_build/lib/pkgconfig
+
+./configure \
+  --prefix="$HOME/Projects/ffmpeg_build" \
+  --pkg-config-flags="--static" \
+  --extra-cflags="-I$HOME/Projects/ffmpeg_build/include" \
+  --extra-ldflags="-L$HOME/Projects/ffmpeg_build/lib" \
+  --extra-libs="-lpthread -lm" \
+  --ld="g++" \
+  --bindir="$HOME/Projects/ffmpeg_bin" \
+  --disable-static \
+  --enable-shared \
+  --enable-openssl
+
+make
+make install
+
+
+# For Mac, ffmpeg-kit doesn't provide a clean way to produce .dylib which Unreal needs
+# So getting the .dylib directly from ffmpeg build system is nearly identical as for Linux
+# but I omit openssl for simplicity:
+
+export PKG_CONFIG_PATH=~/Projects/ffmpeg_build/lib/pkgconfig
+
+./configure \
+  --prefix="$HOME/Projects/ffmpeg_build" \
+  --pkg-config-flags="--static" \
+  --extra-cflags="-I$HOME/Projects/ffmpeg_build/include" \
+  --extra-ldflags="-L$HOME/Projects/ffmpeg_build/lib" \
+  --extra-libs="-lpthread -lm" \
+  --ld="g++" \
+  --bindir="$HOME/Projects/ffmpeg_bin" \
+  --disable-static \
+  --enable-shared
+
+make
+make install
+
+
+# iOS using ffmpeg-kit with following parameters to produce small sized binaries which 
+# can be accepted by github
+ios.sh --lts --enable-openssl --disable-armv7 --disable-armv7s --disable-arm64-mac-catalyst --disable-arm64-simulator --disable-i386 --disable-x86-64 --disable-x86-64-mac-catalyst

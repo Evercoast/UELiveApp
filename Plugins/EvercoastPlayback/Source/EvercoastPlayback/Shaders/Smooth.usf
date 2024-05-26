@@ -1,0 +1,64 @@
+#include "/Engine/Public/Platform.ush"
+#include "/Engine/Private/Common.ush"
+
+void MainVS(
+	float2 InPosition : ATTRIBUTE0,
+	float2 InUV       : ATTRIBUTE1,
+	out FScreenVertexOutput Output
+	)
+{
+#if METAL_PROFILE || COMPILER_GLSL_ES3_1
+	DrawRectangle( float4( InPosition, 0, 1 ), InUV, Output.Position, Output.UV);
+#else
+	float2 OutUV;
+	DrawRectangle( float4( InPosition, 0, 1 ), InUV, Output.Position, OutUV);
+	Output.UV = MaterialFloat2(OutUV);
+#endif
+
+	
+}
+
+SamplerState Filter_Sampler;
+Texture2D Filter_Texture; 
+float2 Filter_Texture_Size;
+
+
+float4 SampleFilterTexture(float2 UV)
+{
+	return Texture2DSampleLevel(Filter_Texture, Filter_Sampler, UV, 0);
+}
+
+// https://www.rastergrid.com/blog/2010/09/efficient-gaussian-blur-with-linear-sampling/
+float4 GaussianFilter(float2 InUV, float2 stride)
+{
+
+	const float SampleOffsets[3] = {0.0, 1.3846153846, 3.2307692308};
+	const float SampleWeights[3] = {0.2270270270, 0.3162162162, 0.0702702703};
+
+	float4 Color = SampleFilterTexture(InUV) * SampleWeights[0];
+	for (int i = 1; i < 3; ++i)
+	{
+		float2 uv = InUV.xy + SampleOffsets[i] * stride;
+		Color += SampleFilterTexture(uv) * SampleWeights[i];
+
+		uv = InUV.xy - SampleOffsets[i] * stride;
+		Color += SampleFilterTexture(uv) * SampleWeights[i];
+	}
+	return Color;
+
+}
+
+void MainPS_Horizontal(noperspective float2 InUV : TEXCOORD0, out float4 OutColor : SV_Target0)
+{
+	OutColor = GaussianFilter(InUV, float2(1.0 / Filter_Texture_Size.x, 0));
+}
+
+void MainPS_Vertical(noperspective float2 InUV : TEXCOORD0, out float4 OutColor : SV_Target0)
+{
+	OutColor = GaussianFilter(InUV, float2(0, 1.0 / Filter_Texture_Size.y));
+}
+
+void MainPS_CopyThrough(noperspective float2 InUV : TEXCOORD0, out float4 OutColor : SV_Target0)
+{
+	OutColor = SampleFilterTexture(InUV);
+}
