@@ -942,6 +942,9 @@ void UCortoMeshRendererComp::SetCortoMeshMaterial(UMaterialInterface* pMaterial)
 		CheckImageEnhanceMaterialParams();
 		ApplyImageEnhanceMaterialParams();
 
+		CheckEyeAdaptationCorrectionMaterialParams();
+		ApplyEyeAdaptationCorrectionMaterialParams();
+
 		MarkRenderStateDirty();
 
 		m_materialDirty = true;
@@ -994,6 +997,12 @@ static FName s_ImageEnhanceMaterialParameterNames[] = {
 	FName(TEXT("Additional_Gamma")),
 };
 
+
+static FName s_EyeAdaptationCorrectionMaterialParameterNames[] = {
+	FName(TEXT("TexelEmission")),
+	FName(TEXT("CorrectionIntensity")),
+};
+
 void UCortoMeshRendererComp::CommitImageEnhanceMaterialParams()
 {
 	if (!m_materialInstance)
@@ -1003,6 +1012,17 @@ void UCortoMeshRendererComp::CommitImageEnhanceMaterialParams()
 
 	CheckImageEnhanceMaterialParams();
 	ApplyImageEnhanceMaterialParams();
+}
+
+void UCortoMeshRendererComp::CommitEyeAdaptationCorrectionMaterialParams()
+{
+	if (!m_materialInstance)
+	{
+		m_materialInstance = CreateAndSetMaterialInstanceDynamicFromMaterial(0, CortoMeshMaterial);
+	}
+
+	CheckEyeAdaptationCorrectionMaterialParams();
+	ApplyEyeAdaptationCorrectionMaterialParams();
 }
 
 void UCortoMeshRendererComp::CheckImageEnhanceMaterialParams()
@@ -1037,7 +1057,39 @@ void UCortoMeshRendererComp::CheckImageEnhanceMaterialParams()
 	bIsImageEnhancementMaterial = false;
 }
 
-#define CONVERT_TO_LINEAR (0)
+
+void UCortoMeshRendererComp::CheckEyeAdaptationCorrectionMaterialParams()
+{
+	if (m_materialInstance)
+	{
+		int expectedParamCount = sizeof(s_EyeAdaptationCorrectionMaterialParameterNames) / sizeof(FName);
+		int matchedParamCount = 0;
+		// Check one parameter
+		TArray<FMaterialParameterInfo> paramInfos;
+		TArray<FGuid> paramGuid;
+		m_materialInstance->GetAllScalarParameterInfo(paramInfos, paramGuid);
+		for (auto& paramInfo : paramInfos)
+		{
+			for (int i = 0; i < expectedParamCount; ++i)
+			{
+				if (paramInfo.Name == s_EyeAdaptationCorrectionMaterialParameterNames[i])
+				{
+					matchedParamCount++;
+					break;
+				}
+			}
+		}
+
+		if (matchedParamCount >= expectedParamCount)
+		{
+			bIsEyeAdaptationCorrectedMaterial = true;
+			return;
+		}
+	}
+
+	bIsEyeAdaptationCorrectedMaterial = false;
+}
+
 
 void UCortoMeshRendererComp::SetTextureData(std::shared_ptr<CortoLocalTextureFrame> localTexture)
 {
@@ -1049,6 +1101,9 @@ void UCortoMeshRendererComp::SetTextureData(std::shared_ptr<CortoLocalTextureFra
 		m_materialInstance = CreateAndSetMaterialInstanceDynamicFromMaterial(0, pMaterial);
 		CheckImageEnhanceMaterialParams();
 		ApplyImageEnhanceMaterialParams();
+
+		CheckEyeAdaptationCorrectionMaterialParams();
+		ApplyEyeAdaptationCorrectionMaterialParams();
 
 		if (SceneProxy)
 		{
@@ -1070,13 +1125,7 @@ void UCortoMeshRendererComp::SetTextureData(std::shared_ptr<CortoLocalTextureFra
 	// getting ready to make a copy
 	int32 width = texture->GetSurfaceWidth();
 	int32 height = texture->GetSurfaceHeight();
-
-#if CONVERT_TO_LINEAR
-	EPixelFormat pixelFormat = PF_A32B32G32R32F;
-#else
 	EPixelFormat pixelFormat = PF_B8G8R8A8;
-#endif
-	
 	if (localTexture->NeedsSwizzle())
 	{
 		pixelFormat = PF_R8G8B8A8;
@@ -1273,11 +1322,24 @@ void UCortoMeshRendererComp::ApplyImageEnhanceMaterialParams()
 	}
 }
 
+
+void UCortoMeshRendererComp::ApplyEyeAdaptationCorrectionMaterialParams()
+{
+	if (m_materialInstance && bIsEyeAdaptationCorrectedMaterial)
+	{
+		m_materialInstance->SetScalarParameterValue(FName(TEXT("TexelEmission")), PostEyeAdaptationCorrectionTexelEmission);
+		m_materialInstance->SetScalarParameterValue(FName(TEXT("CorrectionIntensity")), EyeAdaptationCorrectionIntensity);
+	}
+}
+
 #if WITH_EDITOR
 void UCortoMeshRendererComp::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	CheckImageEnhanceMaterialParams();
 	ApplyImageEnhanceMaterialParams();
+
+	CheckEyeAdaptationCorrectionMaterialParams();
+	ApplyEyeAdaptationCorrectionMaterialParams();
 
 	SceneProxy = nullptr;
 	for (int i = 0; i < 2; ++i)

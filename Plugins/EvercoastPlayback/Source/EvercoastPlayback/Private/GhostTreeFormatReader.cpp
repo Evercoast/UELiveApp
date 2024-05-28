@@ -560,7 +560,7 @@ UGhostTreeFormatReader::~UGhostTreeFormatReader()
 		m_runtimeAudioDecodeThread.reset();
 	}
 
-	
+	m_audioComponent = nullptr;
 }
 
 void UGhostTreeFormatReader::OnReaderEvent(ECReaderEvent event)
@@ -1584,6 +1584,16 @@ void UGhostTreeFormatReader::CreateCache()
 
 void UGhostTreeFormatReader::Close()
 {
+	// Wait for audio opening thread to be finished, not likely but happens!
+	if (m_runtimeAudioDecodeThread)
+	{
+		UE_LOG(EvercoastReaderLog, Verbose, TEXT("Wait for decode thread on Close: %s"), *m_runtimeAudioDecodeThread->GetThreadName());
+		m_runtimeAudioDecodeThread->Kill(true);
+		m_runtimeAudioDecodeThread.reset();
+	}
+
+	m_audioComponent = nullptr;
+
 	ProcessRequestResults();
 	// finish the last block available before closing
 	FinishCurrentBlock();
@@ -1826,7 +1836,14 @@ TSharedRef<IHttpRequest, ESPMode::ThreadSafe> UGhostTreeFormatReader::NewHttpReq
 void UGhostTreeFormatReader::OnRuntimeAudioResult(URuntimeAudio* newRuntimeAudio, ERuntimeAudioFactoryResult result)
 {
 	// Need to do it in game thread as it might trigger audio component to play, which only allowed to called on game thread
-	check(m_audioComponent);
+	if (!m_audioComponent)
+	{
+		// This check is necessary as the MUTLICAST_DELEGATE.Broadcast() method can be very much delayed on main thread
+		// When loading maps, the GT reader object might get constructed then destructed quickly, leaving the callback
+		// calling on an closed, or even destroyed GT reader object.
+		return;
+	}
+
 	if (result == ERuntimeAudioFactoryResult::Succeeded)
 	{
 		m_audioComponent->SetSound(newRuntimeAudio);

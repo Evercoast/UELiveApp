@@ -27,4 +27,8 @@ public:
 	virtual bool SupportsDynamicReloading() override;
 
 private:
+	void SetupPicoQuicLibrary();
+	/** Handle to the test dll we will load */
+	void* PicoQuicDllHandle;
+
 };

@@ -11,9 +11,9 @@
 			<copyFile src="$S(PluginDir)/../ThirdParty/GhostTree/lib/Android/armeabi-v7a/libdecoding.so"
             			dst="$S(BuildDir)/libs/armeabi-v7a/libdecoding.so" />
 
-      <log text="Copying libcortocodec.so"/>
-      <copyFile src="$S(PluginDir)/../ThirdParty/corto/lib/Android/armeabi-v7a/libcortocodec_unity.so"
-            			dst="$S(BuildDir)/libs/armeabi-v7a/libcortocodec_unity.so" />
+      <log text="Copying libcorto_dll.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/corto/lib/Android/armeabi-v7a/libcorto_dll.so"
+            			dst="$S(BuildDir)/libs/armeabi-v7a/libcorto_dll.so" />
 
       <log text="Copying libwebpdecoder.so"/>
       <copyFile src="$S(PluginDir)/../ThirdParty/libwebp/lib/Android/armeabi-v7a/libwebpdecoder.so"
@@ -58,9 +58,9 @@
 			<copyFile src="$S(PluginDir)/../ThirdParty/GhostTree/lib/Android/arm64-v8a/libdecoding.so"
             			dst="$S(BuildDir)/libs/arm64-v8a/libdecoding.so" />
 
-      <log text="Copying libcortocodec.so"/>
-      <copyFile src="$S(PluginDir)/../ThirdParty/corto/lib/Android/arm64-v8a/libcortocodec_unity.so"
-            			dst="$S(BuildDir)/libs/arm64-v8a/libcortocodec_unity.so" />
+      <log text="Copying libcorto_dll.so"/>
+      <copyFile src="$S(PluginDir)/../ThirdParty/corto/lib/Android/arm64-v8a/libcorto_dll.so"
+            			dst="$S(BuildDir)/libs/arm64-v8a/libcorto_dll.so" />
 
       <log text="Copying libwebpdecoder.so"/>
       <copyFile src="$S(PluginDir)/../ThirdParty/libwebp/lib/Android/arm64-v8a/libwebpdecoder.so"
@@ -94,6 +94,10 @@
       <copyFile src="$S(PluginDir)/../ThirdParty/ffmpeg/lib/Android/arm64-v8a/libswscale.so"
             			dst="$S(BuildDir)/libs/arm64-v8a/libswscale.so" />
 		</isArch>
+
+      <log text="Copying libpicoquicclient.so"/>
+            <copyFile src="$S(PluginDir)/../ThirdParty/picoquic/lib/Android/libpicoquicclient.so"
+                              dst="$S(BuildDir)/libs/arm64-v8a/libpicoquicclient.so" />
 
 	</resourceCopies>
 </root>

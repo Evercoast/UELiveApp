@@ -47,6 +47,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Rendering")
 	void CommitImageEnhanceMaterialParams();
 
+	UFUNCTION(BlueprintCallable, Category = "Rendering")
+	void CommitEyeAdaptationCorrectionMaterialParams();
+
 	//~ Begin UObject Interface.
 	virtual void BeginDestroy() override;
 	//~ End UObject Interface.
@@ -97,6 +100,12 @@ public:
 
 	UPROPERTY(EditAnywhere, meta=(ClampMin = "-5.0", ClampMax = "5.0"), BlueprintReadWrite, Category = "Rendering")
 	float AdditionalGamma = 1.0f;
+
+	UPROPERTY(EditAnywhere, meta = (ClampMin = "0.0", ClampMax = "1.0"), BlueprintReadWrite, Category = "Rendering")
+	float EyeAdaptationCorrectionIntensity = 1.0f;
+
+	UPROPERTY(EditAnywhere, meta = (ClampMin = "0.0", ClampMax = "2.0"), BlueprintReadWrite, Category = "Rendering")
+	float PostEyeAdaptationCorrectionTexelEmission = 1.0f;
 	
 	UPROPERTY(EditAnywhere, Category = "Rendering");
 	bool bGenerateNormal = true;
@@ -122,6 +131,9 @@ private:
 	void ApplyImageEnhanceMaterialParams();
 	void CheckImageEnhanceMaterialParams();
 
+	void ApplyEyeAdaptationCorrectionMaterialParams();
+	void CheckEyeAdaptationCorrectionMaterialParams();
+
 	std::shared_ptr<CortoDataUploader> m_meshUploader;
 	std::shared_ptr<CortoLocalMeshFrame> m_currLocalMeshFrame;
 	std::shared_ptr<CortoLocalTextureFrame> m_currLocalTextureFrame;
@@ -139,6 +151,9 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, Category="Evercoast Playback")
 	bool bIsImageEnhancementMaterial = false;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Evercoast Playback")
+	bool bIsEyeAdaptationCorrectedMaterial = false;
 
 	int m_mainTexturePtr = 0;
 

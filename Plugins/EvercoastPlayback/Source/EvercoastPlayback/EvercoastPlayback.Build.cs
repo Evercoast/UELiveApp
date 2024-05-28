@@ -5,7 +5,7 @@
 * @Author: Ye Feng
 * @Date:   2021-11-17 02:28:37
 * @Last Modified by:   feng_ye
-* @Last Modified time: 2023-10-26 21:12:58
+* @Last Modified time: 2024-05-02 05:26:53
 */
 using System;
 using System.IO;
@@ -88,6 +88,7 @@ public class EvercoastPlayback : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
+			"Projects",
 			"InputCore",
 			"HeadMountedDisplay",
 			"AudioMixer",
@@ -184,8 +185,8 @@ public class EvercoastPlayback : ModuleRules
         else if (Target.Platform == UnrealTargetPlatform.Android)
         {
             // Well we copied Kieran's build here so have to stick with the naming :)
-            PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "corto", "lib", "Android", "arm64-v8a", "libcortocodec_unity.so"));
-            PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "corto", "lib", "Android", "armeabi-v7a", "libcortocodec_unity.so"));
+            PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "corto", "lib", "Android", "arm64-v8a", "libcorto_dll.so"));
+            PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "corto", "lib", "Android", "armeabi-v7a", "libcorto_dll.so"));
         }
         else if (Target.Platform == UnrealTargetPlatform.Mac)
         {
@@ -352,6 +353,43 @@ public class EvercoastPlayback : ModuleRules
         	PublicAdditionalFrameworks.Add(new Framework("libswresample", Path.Combine(ThirdPartyRoot, "ffmpeg", "lib", "iOS", "libswresample.framework"), "", true));
         	PublicAdditionalFrameworks.Add(new Framework("libswscale", Path.Combine(ThirdPartyRoot, "ffmpeg", "lib", "iOS", "libswscale.framework"), "", true));
         }
+
+        // PicoQuic
+		PublicIncludePaths.Add(Path.Combine(ThirdPartyRoot, "picoquic", "include"));
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			RuntimeDependencies.Add("$(BinaryOutputDir)/picoquicclient.dll", Path.Combine(ThirdPartyRoot, "picoquic", "lib", "Windows", "picoquicclient.dll"));
+            RuntimeDependencies.Add("$(BinaryOutputDir)/picoquicclient_old.dll", Path.Combine(ThirdPartyRoot, "picoquic", "lib", "Windows", "picoquicclient_old.dll"));
+        }
+		else if (Target.Platform == UnrealTargetPlatform.Android)
+		{
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "picoquic", "lib", "Android", "libpicoquicclient.so"));
+		}
+		else if (Target.Platform == UnrealTargetPlatform.Linux)
+		{
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "picoquic", "lib", "Linux", "libpicoquicclient.so"));
+		}
+		else if (Target.Platform == UnrealTargetPlatform.Mac)
+		{
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "picoquic", "lib", "Mac", "libpicoquicclient.dylib"));
+			RuntimeDependencies.Add("$(BinaryOutputDir)/libpicoquicclient.dylib", Path.Combine(ThirdPartyRoot, "picoquic", "lib", "Mac", "libpicoquicclient.dylib"));
+		}
+		else if (Target.Platform == UnrealTargetPlatform.IOS)
+		{
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "picoquic", "lib", "iOS", "libpicoquicclient.a"));
+
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "picoquic", "lib", "iOS", "libcrypto.a"));
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "picoquic", "lib", "iOS", "libpicoquic-core.a"));
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "picoquic", "lib", "iOS", "libpicoquic-log.a"));
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "picoquic", "lib", "iOS", "libpicotls-core.a"));
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "picoquic", "lib", "iOS", "libpicotls-openssl.a"));
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "picoquic", "lib", "iOS", "libssl.a"));
+		}
+		else
+		{
+			// Not supported platform, fail the build
+			throw new EvercoastUnsupportedPlatformException();
+		}
 
 		if (Target.Platform == UnrealTargetPlatform.Android)
         {

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "EvercoastPerfCounter.h"
 #include "EvercoastVolcapActor.generated.h"
 
 class UEvercoastStreamingReaderComp;

@@ -1,7 +1,7 @@
 {
     "FileVersion": 3,
-    "Version": 410,
-    "VersionName": "0.4.1",
+    "Version": 510,
+    "VersionName": "0.5.1",
     "FriendlyName": "EvercoastPlayback",
     "Description": "Playback and render Evercoast's ECV/ECM contents",
     "Category": "Other",

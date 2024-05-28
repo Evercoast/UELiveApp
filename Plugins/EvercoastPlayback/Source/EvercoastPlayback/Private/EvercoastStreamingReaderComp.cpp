@@ -310,6 +310,7 @@ void UEvercoastStreamingReaderComp::ResetReader()
 	m_readerHasFatalError = false;
 	m_currentMatchingFrameNumber = 0;
 	m_currentMatchingTimestamp = 0.0f;
+	m_audioComponent = nullptr;
 
 }
 

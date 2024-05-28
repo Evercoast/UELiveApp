@@ -17,7 +17,8 @@ void EvercoastPerfCounter::AddSample()
 {
 	std::lock_guard<std::mutex> guard(_mutex);
 
-	DataType dataType{ .timestamp = FPlatformTime::Seconds() };
+	DataType dataType;
+	dataType.timestamp = FPlatformTime::Seconds();
 	dataType.data.measuredInt64 = 1;
 	_measurements.push_back(dataType);
 
@@ -32,7 +33,8 @@ void EvercoastPerfCounter::AddSampleAsInt64(int64_t measuredData)
 {
 	std::lock_guard<std::mutex> guard(_mutex);
 
-	DataType dataType{ .timestamp = FPlatformTime::Seconds() };
+	DataType dataType;
+	dataType.timestamp = FPlatformTime::Seconds();
 	dataType.data.measuredInt64 = measuredData;
 
 	_measurements.push_back(dataType);
@@ -47,7 +49,8 @@ void EvercoastPerfCounter::AddSampleAsDouble(double measuredData)
 {
 	std::lock_guard<std::mutex> guard(_mutex);
 
-	DataType dataType{ .timestamp = FPlatformTime::Seconds() };
+	DataType dataType;
+	dataType.timestamp = FPlatformTime::Seconds();
 	dataType.data.measuredDouble = measuredData;
 	_measurements.push_back(dataType);
 

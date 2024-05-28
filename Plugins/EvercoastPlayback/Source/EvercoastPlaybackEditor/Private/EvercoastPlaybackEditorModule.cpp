@@ -5,7 +5,7 @@
 * @Author: Ye Feng
 * @Date:   2021-11-17 04:24:53
 * @Last Modified by:   feng_ye
-* @Last Modified time: 2023-10-24 12:24:30
+* @Last Modified time: 2024-05-02 04:03:41
 */
 #include "EvercoastPlaybackEditorModule.h"
 #include "AssetToolsModule.h"
@@ -161,7 +161,7 @@ void FEvercoastPlaybackEditorModule::ValidatePackageSettings()
 	FString absolutePluginPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectPluginsDir());
 	FPaths::MakePathRelativeTo(absolutePluginPath, *FPaths::ProjectContentDir());
 
-	FString realtimeCryptoDir = FPaths::Combine(absolutePluginPath, "EvercoastRealtime/Content/Crypto");
+	FString realtimeCryptoDir = FPaths::Combine(absolutePluginPath, TEXT("EvercoastPlayback/Content/Crypto"));
 	bool bEvercoastCryptoDirectoryFound = false;
 	for (int i = 0; i < PackagingSettings->DirectoriesToAlwaysStageAsUFS.Num(); ++i)
 	{

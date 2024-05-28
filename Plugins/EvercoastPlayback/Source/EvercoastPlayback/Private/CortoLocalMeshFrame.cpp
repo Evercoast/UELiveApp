@@ -4,7 +4,14 @@
 #include "Engine/Texture2D.h"
 #include "TextureResource.h"
 #include "RenderingThread.h"
-#include "Math/Color.h"
+
+#if PLATFORM_ANDROID
+#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 2
+#include "DataDrivenShaderPlatformInfo.h"
+#else
+#include "RHIDefinitions.h"
+#endif
+#endif
 
 // NOTE:
 // We need to keep this local mesh frame class to do the unit and coordinate system conversion
@@ -28,15 +35,15 @@ CortoLocalMeshFrame::CortoLocalMeshFrame(const CortoWebpUnifiedDecodeResult* pRe
 	FVector3f* pDst = m_positionBuffer.GetData();
 	const FVector3f* pSrc = pResult->meshResult->PositionBuffer.data();;
 	
-	for (uint32_t i = 0; i < m_vertexCount; ++i)
-	{
-		pDst->X = pSrc->X * 100.0f;
-		pDst->Y = pSrc->Z * 100.0f;
-		pDst->Z = pSrc->Y * 100.0f;
+	ParallelFor(m_vertexCount, [&](int32 k)
+		{
+			const FVector3f& SrcVertexPos = *(pSrc + k);
+			FVector3f& DstVertexPos = *(pDst + k);
 
-		++pDst;
-		++pSrc;
-	}
+			DstVertexPos.X = SrcVertexPos.X * 100.0f;
+			DstVertexPos.Y = SrcVertexPos.Z * 100.0f;
+			DstVertexPos.Z = SrcVertexPos.Y * 100.0f;
+		});
 
 	if (pResult->meshResult->HasNormals())
 	{
@@ -45,15 +52,15 @@ CortoLocalMeshFrame::CortoLocalMeshFrame(const CortoWebpUnifiedDecodeResult* pRe
 		FVector3f* pNormalDst = m_normalBuffer.GetData();
 		const FVector3f* pNormalSrc = pResult->meshResult->NormalBuffer.data();;
 
-		for (uint32_t i = 0; i < m_vertexCount; ++i)
-		{
-			pNormalDst->X = pNormalSrc->X;
-			pNormalDst->Y = pNormalSrc->Z;
-			pNormalDst->Z = pNormalSrc->Y;
+		ParallelFor(m_vertexCount, [&](int32 k)
+			{
+				const FVector3f& SrcVertexNormal = *(pNormalSrc + k);
+				FVector3f& DstVertexNormal = *(pNormalDst + k);
 
-			++pNormalDst;
-			++pNormalSrc;
-		}
+				DstVertexNormal.X = SrcVertexNormal.X;
+				DstVertexNormal.Y = SrcVertexNormal.Z;
+				DstVertexNormal.Z = SrcVertexNormal.Y;
+			});
 	}
 	else
 	{
@@ -83,8 +90,6 @@ CortoLocalTextureFrame::CortoLocalTextureFrame(const CortoWebpUnifiedDecodeResul
     UpdateTexture(pResult);
 }
 
-#define CONVERT_TO_LINEAR (0)
-
 void CortoLocalTextureFrame::UpdateTexture(const CortoWebpUnifiedDecodeResult* pResult)
 {
 	if (pResult->imgResult->IsValid())
@@ -102,12 +107,7 @@ void CortoLocalTextureFrame::UpdateTexture(const CortoWebpUnifiedDecodeResult* p
 				m_localTexture->ReleaseResource();
 				m_localTexture = nullptr;
 			}
-
-#if CONVERT_TO_LINEAR
-			m_localTexture = UTexture2D::CreateTransient(Width, Height, EPixelFormat::PF_A32B32G32R32F);
-#else
 			m_localTexture = UTexture2D::CreateTransient(Width, Height, EPixelFormat::PF_B8G8R8A8);
-#endif
 			m_localTexture->UpdateResource();
 		}
 
@@ -120,33 +120,7 @@ void CortoLocalTextureFrame::UpdateTexture(const CortoWebpUnifiedDecodeResult* p
 		void* TextureData = Mip0.BulkData.Lock(LOCK_READ_WRITE);
 
 		const int32 PixelStride = (int32)(BitPerPixel / 8);
-#if CONVERT_TO_LINEAR
-		int count = 0;
-		float* TextureDataAsFloat = (float*)TextureData;
-
-		uint32_t* SrcDataAsUint = (uint32_t*)pResult->imgResult->RawTexelBuffer;
-		for (int j = 0; j < Height; ++j)
-		{
-			for (int i = 0; i < Width; ++i)
-			{
-				uint32_t col = SrcDataAsUint[j * Width + i];
-
-				// B8G8R8A8
-				FLinearColor linearCol = FLinearColor::FromPow22Color(FColor(col));
-				TextureDataAsFloat[count++] = linearCol.R;//(float)i / Width;
-				TextureDataAsFloat[count++] = linearCol.G;//(float)j / Height;
-				TextureDataAsFloat[count++] = linearCol.B;//0;
-				TextureDataAsFloat[count++] = linearCol.A;
-				
-				
-				
-			}
-		}
-#else
-		
 		FMemory::Memcpy(TextureData, pResult->imgResult->RawTexelBuffer, SIZE_T(Width * Height * PixelStride));
-		
-#endif
 
 		Mip0.BulkData.Unlock();
 
