@@ -8,8 +8,6 @@
 
 DEFINE_LOG_CATEGORY(EvercoastRealtimeAudioLog);
 
-static const int WARM_UP_SECS = 3;
-
 UPicoAudioSoundWave::UPicoAudioSoundWave(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
@@ -117,6 +115,9 @@ void UPicoAudioSoundWave::QueueAudio(double timestamp, uint64 frameNum, const ui
 
 		// Save the last segment
 		m_lastReceivedSegment = newAudioSegment;
+
+		std::lock_guard lock2(m_stats_mutex);
+		m_lastReceivedAudioTimestamp = m_lastReceivedSegment.timestamp;
 	}
 	else if (frameNumDiff >= 10)
 	{
@@ -213,12 +214,7 @@ void UPicoAudioSoundWave::PumpQueuedAudio()
 			// audio timestmap won't progress. There seems no need to put m_audioBufferPumpDelay into the equation
 			if (m_audioBufferPumpDelay > 0 && segment.timestamp /* + segment.duration*/ > m_currVideoSyncingExtrapolatedTimestamp)// + m_audioBufferPumpDelay)
 			{
-				// We rely on warm-up process to fill in enough audio buffer
-				//if (m_audioBuffer.Num() >= 32768)
-				{
-					break;
-				}
-				
+				break;
 			}
 
 			m_audioBuffer.Append(m_segments.front().pcm);
@@ -290,7 +286,7 @@ int32 UPicoAudioSoundWave::GeneratePCMData(uint8* PCMData, const int32 SamplesNe
 		// Warm up
 		PumpQueuedAudio();
 
-		if (m_audioBuffer.Num() >= WARM_UP_SECS * NumChannels * SampleRate)
+		if (m_audioBuffer.Num() >= (int32)(m_warmupTime * NumChannels * SampleRate))
 		{
 			m_isReady = true;
 		}
@@ -369,6 +365,7 @@ void UPicoAudioSoundWave::ResetAudio()
 		std::lock_guard lock(m_stats_mutex);
 		m_lastAudioBufferTimestamp = 0;
 		m_lastPCMGenerationFedTimestamp = 0;
+		m_lastReceivedAudioTimestamp = 0;
 	}
 }
 
@@ -423,6 +420,13 @@ double UPicoAudioSoundWave::GetLastFedPCMTimestamp() const
 	return m_lastPCMGenerationFedTimestamp;
 }
 
+double UPicoAudioSoundWave::GetLastReceivedPCMTimestamp() const
+{
+	std::lock_guard lock(m_stats_mutex);
+
+	return m_lastReceivedAudioTimestamp;
+}
+
 void UPicoAudioSoundWave::SetMissingFrameCounter(std::shared_ptr<EvercoastPerfCounter> counter)
 {
 	m_missingFrameCounter = counter;
@@ -434,4 +438,9 @@ void UPicoAudioSoundWave::SetAudioBufferDelay(double delayInSeconds)
 	std::lock_guard lock(m_mutex);
 
 	m_audioBufferPumpDelay = delayInSeconds;
+}
+
+void UPicoAudioSoundWave::SetWarmupTime(float warmupTime)
+{
+	m_warmupTime = warmupTime;
 }

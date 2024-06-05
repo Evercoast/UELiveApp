@@ -14,4 +14,6 @@ public:
     FString CertificationPath;
     UPROPERTY(Config, BlueprintReadOnly)
     FString AccessToken;
+    UPROPERTY(Config, BlueprintReadOnly)
+    float WarmUpTime = 1.0f;
 };

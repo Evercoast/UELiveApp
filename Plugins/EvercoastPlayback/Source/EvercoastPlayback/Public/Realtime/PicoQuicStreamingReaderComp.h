@@ -87,6 +87,9 @@ public:
 	float GetVideoLaggingTime();
 
 	UFUNCTION(BlueprintCallable, Category = "Profiling")
+	float GetActualVideoBehindAudioTime();
+
+	UFUNCTION(BlueprintCallable, Category = "Profiling")
 	int GetVideoDiscardedCount();
 
 	UFUNCTION(BlueprintCallable, Category = "Profiling")
@@ -187,6 +190,7 @@ private:
 	std::shared_ptr<EvercoastPerfCounter>				m_dataDecodingCounter;
 	std::shared_ptr<EvercoastPerfCounter>				m_audioFrameMissCounter;
 	std::shared_ptr<EvercoastPerfCounter>				m_videoLaggingCounter;
+	std::shared_ptr<EvercoastPerfCounter>				m_videoBehindAudioCounter;
 	std::shared_ptr<EvercoastPerfCounter>				m_videoDiscardCounter;
 
 	std::deque<std::shared_ptr<GenericDecodeResult>>	m_decodedResultQueue;

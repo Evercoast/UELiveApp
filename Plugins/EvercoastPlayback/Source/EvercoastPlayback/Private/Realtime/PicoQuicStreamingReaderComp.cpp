@@ -44,7 +44,8 @@ m_dataUploadingPaused(false)
 	m_dataReceivingCounter = std::make_shared<EvercoastPerfCounter>("Data Reciving Rate", 2.0f);
 	m_dataDecodingCounter = std::make_shared<EvercoastPerfCounter>("Data Decoding Rate", 2.0f);
 	m_audioFrameMissCounter = std::make_shared<EvercoastPerfCounter>("Audio Frame Missing", 2.0f);
-	m_videoLaggingCounter = std::make_shared<EvercoastPerfCounter>("Video Lagging", 2.0f);
+	m_videoLaggingCounter = std::make_shared<EvercoastPerfCounter>("Video Lagging After Compensation", 2.0f);
+	m_videoBehindAudioCounter = std::make_shared<EvercoastPerfCounter>("Video Behind Audio", 2.0f);
 	m_videoDiscardCounter = std::make_shared<EvercoastPerfCounter>("Video Discarded", 2.0f);
 
 	
@@ -150,6 +151,12 @@ void UPicoQuicStreamingReaderComp::Connect(const FString& serverName, int port, 
 
 	// Get config
 	UEvercoastRealtimeConfig* config = NewObject<UEvercoastRealtimeConfig>();
+	// Setup audio's warm up time
+	if (m_sound)
+	{
+		m_sound->SetWarmupTime(config->WarmUpTime);
+	}
+
 	FString realtimeCryptoFilename = config->CertificationPath;
 
 	FString authToken = accessToken;
@@ -370,6 +377,17 @@ void UPicoQuicStreamingReaderComp::TickComponent(float DeltaTime, ELevelTick Tic
 			bool needFurtherUploading = true;
 			if (result)
 			{
+
+				if (m_sound)
+				{
+					double actualReceivedAudioVideoDiff = m_sound->GetLastReceivedPCMTimestamp() - result->frameTimestamp;
+					m_videoBehindAudioCounter->AddSampleAsDouble(actualReceivedAudioVideoDiff);
+				}
+
+				// If there's sound and sound packets are arriving in timely order
+				// we'll use audio data as a timestamp provider to guide
+				// audio/video sync
+				// that should be the most precise audio timestamp we can get
 				if (m_sound && !IgnoreAudio)
 				{
 					m_sound->Sync(result->frameTimestamp);
@@ -377,14 +395,7 @@ void UPicoQuicStreamingReaderComp::TickComponent(float DeltaTime, ELevelTick Tic
 
 					// Add delay to the sound buffer to match up sync-ing
 					m_sound->SetAudioBufferDelay(m_videoLaggingCounter->GetSampleAverageDoubleOnCount());
-				}
 
-				// If there's sound and sound packets are arriving in timely order
-				// we'll use audio data as a timestamp provider to guide
-				// audio/video sync
-				 // that should be the most precise audio timestamp we can get
-				if (m_sound && !IgnoreAudio)
-				{
 					m_decodedResultQueue.push_back(result);
 				}
 				// otherwise we'll upload geometry data ASAP
@@ -606,6 +617,11 @@ int UPicoQuicStreamingReaderComp::GetAudioFrameMissing()
 float UPicoQuicStreamingReaderComp::GetVideoLaggingTime()
 {
 	return (float)m_videoLaggingCounter->GetSampleAverageDoubleOnCount();
+}
+
+float UPicoQuicStreamingReaderComp::GetActualVideoBehindAudioTime()
+{
+	return (float)m_videoBehindAudioCounter->GetSampleAverageDoubleOnCount();
 }
 
 int UPicoQuicStreamingReaderComp::GetVideoDiscardedCount()

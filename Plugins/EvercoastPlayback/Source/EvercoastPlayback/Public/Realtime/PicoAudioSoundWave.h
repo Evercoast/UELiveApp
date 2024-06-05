@@ -69,6 +69,8 @@ public:
 
 	double GetLastFedPCMTimestamp() const;
 
+	double GetLastReceivedPCMTimestamp() const;
+
 	void SetMissingFrameCounter(std::shared_ptr<EvercoastPerfCounter> counter);
 
 	bool HasSynced() const
@@ -79,6 +81,8 @@ public:
 	void SetAudioBufferDelay(double delayInSeconds);
 
 	void Tick(float DeltaTime);
+
+	void SetWarmupTime(float warmupTime);
 
 private:
 	struct AudioSegment
@@ -119,9 +123,12 @@ private:
 	mutable std::mutex m_stats_mutex{};
 	double m_lastAudioBufferTimestamp{ 0 };
 	double m_lastPCMGenerationFedTimestamp{ 0 };
+	double m_lastReceivedAudioTimestamp{ 0 };
 
 	std::shared_ptr<EvercoastPerfCounter> m_missingFrameCounter;
 
 	double m_audioBufferPumpDelay{ 0 };
 	double m_currVideoSyncingExtrapolatedTimestamp{ 0 };
+
+	float m_warmupTime{ 1.0f };
 };

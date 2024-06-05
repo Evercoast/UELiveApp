@@ -1,3 +1,7 @@
+# 0.6.1
+- Add WarmUpTime option to WindowsEvercoastRealtime.ini to fine tune between sync and latency
+- Add Video Lag(Networking) to the statistics panel showing the real difference of timestamps between latest decoded video frame and latest received audio frame
+
 # 0.6.0
 - Use the latest 0.5.1 plugin for better unlit appearance
 - Updated the plugin and associated Blueprints
