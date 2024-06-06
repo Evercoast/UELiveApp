@@ -242,6 +242,7 @@ int32 UPicoAudioSoundWave::GeneratePCMData(uint8* PCMData, const int32 SamplesNe
 		m_audioBuffer.Reset();
 	}
 
+	
 	if (m_hasInitialSynced)
 	{
 		PumpQueuedAudio();
@@ -259,11 +260,19 @@ int32 UPicoAudioSoundWave::GeneratePCMData(uint8* PCMData, const int32 SamplesNe
 
 			if (SamplesAvailable < SamplesNeeded)
 			{
-				UE_LOG(EvercoastRealtimeAudioLog, Warning, TEXT("Audio buffer left over elements: %d PCM buffer needs: %d"), m_audioBuffer.Num(), SamplesNeeded * SampleByteSize);
+				UE_LOG(EvercoastRealtimeAudioLog, Warning, TEXT("Audio buffer left over elements: %d PCM buffer needs: %d. Will fill the rest with 0s"), m_audioBuffer.Num(), SamplesNeeded * SampleByteSize);
 			}
-
+			
 			FMemory::Memcpy((void*)PCMData, &m_audioBuffer[0], BytesToCopy);
 			m_audioBuffer.RemoveAt(0, BytesToCopy, false);
+
+			if (SamplesAvailable < SamplesNeeded)
+			{
+				// Fill the reset with zeros
+				FMemory::Memzero(PCMData + BytesToCopy, (SamplesNeeded - SamplesToCopy) * SampleByteSize);
+			}
+
+			//check(BytesToCopy + (SamplesNeeded - SamplesToCopy) * SampleByteSize == SamplesNeeded * SampleByteSize);
 
 			{
 				// update this important matrics needs lock
@@ -274,19 +283,28 @@ int32 UPicoAudioSoundWave::GeneratePCMData(uint8* PCMData, const int32 SamplesNe
 				m_lastPCMGenerationFedTimestamp = m_lastAudioBufferTimestamp - ((double)SamplesLeft / (NumChannels * SampleRate));
 			}
 
-			return BytesToCopy;
+			return SamplesNeeded;
 		}
 		else
 		{
-			UE_LOG(EvercoastRealtimeAudioLog, Warning, TEXT("Zero available samples. Audio buffer starving."));
+			UE_LOG(EvercoastRealtimeAudioLog, Warning, TEXT("Zero available samples. Audio buffer starving. Will fill with 0s"));
+
+			// Fill the reset with zeros
+			int32 ActualCopiedSize = SamplesNeeded * SampleByteSize;
+			FMemory::Memzero(PCMData, ActualCopiedSize);
+
+			return ActualCopiedSize;
 		}
 	} 
 	else if(!m_isReady)
 	{
+		Audio::EAudioMixerStreamDataFormat::Type Format = GetGeneratedPCMDataFormat();
+		SampleByteSize = (Format == Audio::EAudioMixerStreamDataFormat::Int16) ? 2 : 4;
+
 		// Warm up
 		PumpQueuedAudio();
 
-		if (m_audioBuffer.Num() >= (int32)(m_warmupTime * NumChannels * SampleRate))
+		if (m_audioBuffer.Num() >= (int32)(m_warmupTime * NumChannels * SampleRate * SampleByteSize))
 		{
 			m_isReady = true;
 		}
@@ -443,4 +461,26 @@ void UPicoAudioSoundWave::SetAudioBufferDelay(double delayInSeconds)
 void UPicoAudioSoundWave::SetWarmupTime(float warmupTime)
 {
 	m_warmupTime = warmupTime;
+}
+
+
+float UPicoAudioSoundWave::GetCachedAudioTime() const
+{
+	std::lock_guard lock(m_mutex);
+
+	if(!m_segments.empty())
+	{
+		// Assume every segments have the same duration
+		return m_segments.front().duration * m_segments.size();
+	}
+
+	return 0.0f;
+}
+
+
+float UPicoAudioSoundWave::GetSecondaryCachedAudioTime() const
+{
+	std::lock_guard lock(m_mutex);
+
+	return (float)m_audioBuffer.Num() / (float)(NumChannels * SampleRate * SampleByteSize);
 }

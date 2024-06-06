@@ -90,6 +90,15 @@ public:
 	float GetActualVideoBehindAudioTime();
 
 	UFUNCTION(BlueprintCallable, Category = "Profiling")
+	float GetCachedAudioTime();
+
+	UFUNCTION(BlueprintCallable, Category = "Profiling")
+	float GetSecondaryCachedAudioTime();
+
+	UFUNCTION(BlueprintCallable, Category = "Profiling")
+	int GetCachedVideoFrameCount();
+
+	UFUNCTION(BlueprintCallable, Category = "Profiling")
 	int GetVideoDiscardedCount();
 
 	UFUNCTION(BlueprintCallable, Category = "Profiling")

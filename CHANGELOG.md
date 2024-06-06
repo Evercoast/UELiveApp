@@ -1,3 +1,7 @@
+# 0.6.2
+- Add more to statistics panel
+- Fill sound buffer with zero if no available sound data. This will introduce gaps but will fix latency drift
+
 # 0.6.1
 - Add WarmUpTime option to WindowsEvercoastRealtime.ini to fine tune between sync and latency
 - Add Video Lag(Networking) to the statistics panel showing the real difference of timestamps between latest decoded video frame and latest received audio frame

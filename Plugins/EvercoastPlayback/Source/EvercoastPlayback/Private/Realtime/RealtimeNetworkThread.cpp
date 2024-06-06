@@ -231,7 +231,7 @@ public:
 							}
 							else
 							{
-								UE_LOG(EvercoastRealtimeNetworkLog, Warning, TEXT("Realtime streaming has sound channel but this actor doesn't have AudioComponent."));
+								UE_LOG(EvercoastRealtimeNetworkLog, Verbose, TEXT("Realtime streaming has sound channel but this actor doesn't have AudioComponent."));
 							}
 						}
 					}

@@ -84,6 +84,10 @@ public:
 
 	void SetWarmupTime(float warmupTime);
 
+	float GetCachedAudioTime() const;
+
+	float GetSecondaryCachedAudioTime() const;
+
 private:
 	struct AudioSegment
 	{

@@ -123,20 +123,29 @@ void UPicoQuicStreamingReaderComp::Connect(const FString& serverName, int port, 
 		m_audioComponent->bAlwaysPlay = true;
 		m_audioComponent->bIsUISound = true;
 
-		m_sound = static_cast<UPicoAudioSoundWave*>(m_audioComponent->Sound);
-		if (m_sound)
+		if (!IgnoreAudio)
 		{
-			m_sound->ResetAudio();
-		} 
+			m_sound = static_cast<UPicoAudioSoundWave*>(m_audioComponent->Sound);
+			if (m_sound)
+			{
+				m_sound->ResetAudio();
+			}
+			else
+			{
+				m_sound = NewObject<UPicoAudioSoundWave>(GetTransientPackage(), UPicoAudioSoundWave::StaticClass());
+				m_audioComponent->SetSound(m_sound);
+			}
+
+			m_sound->SetMissingFrameCounter(m_audioFrameMissCounter);
+		}
 		else
 		{
-			m_sound = NewObject<UPicoAudioSoundWave>(GetTransientPackage(), UPicoAudioSoundWave::StaticClass());
-			m_audioComponent->SetSound(m_sound);
+			m_sound = nullptr;
 		}
-
-		
-
-		m_sound->SetMissingFrameCounter(m_audioFrameMissCounter);
+	}
+	else
+	{
+		m_sound = nullptr;
 	}
 
 	if (m_dataDecoder)
@@ -635,6 +644,27 @@ bool UPicoQuicStreamingReaderComp::IsAudioVideoSynced()
 		return m_sound->HasSynced();
 
 	return false;
+}
+
+float UPicoQuicStreamingReaderComp::GetCachedAudioTime()
+{
+	if (m_sound)
+		return m_sound->GetCachedAudioTime();
+	return 0;
+}
+
+
+float UPicoQuicStreamingReaderComp::GetSecondaryCachedAudioTime()
+{
+	if (m_sound)
+		return m_sound->GetSecondaryCachedAudioTime();
+
+	return 0;
+}
+
+int UPicoQuicStreamingReaderComp::GetCachedVideoFrameCount()
+{
+	return (int)m_decodedResultQueue.size();
 }
 
 std::shared_ptr<GenericDecodeResult> UPicoQuicStreamingReaderComp::PopSynchronisedResultRegardsAudioTimestamp(double audioTimestamp, std::shared_ptr<IEvercoastStreamingDataDecoder> disposer)
