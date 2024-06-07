@@ -283,7 +283,8 @@ int32 UPicoAudioSoundWave::GeneratePCMData(uint8* PCMData, const int32 SamplesNe
 				m_lastPCMGenerationFedTimestamp = m_lastAudioBufferTimestamp - ((double)SamplesLeft / (NumChannels * SampleRate));
 			}
 
-			return SamplesNeeded;
+			// Should return the bytes written not the samples!
+			return SamplesNeeded * SampleByteSize;
 		}
 		else
 		{
