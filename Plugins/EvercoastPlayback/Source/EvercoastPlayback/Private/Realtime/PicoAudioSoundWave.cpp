@@ -96,28 +96,35 @@ void UPicoAudioSoundWave::QueueAudio(double timestamp, uint64 frameNum, const ui
 			newAudioBuffer
 		};
 
-		std::lock_guard lock(m_mutex);
-
-		// NOTE: Save the last packet and linear interpolate the from the last -> newest packet
-		for (uint32_t i = 0; i < frameNumDiff; ++i)
+		float lastReceivedSegmentTimestamp;
 		{
-			AudioSegment interpolatedSegment{ -1, -1, -1 };
-			if (InterpolateAudio(newAudioSegment, i, interpolatedSegment))
+			std::lock_guard lock(m_mutex);
+
+			// NOTE: Save the last packet and linear interpolate the from the last -> newest packet
+			for (uint32_t i = 0; i < frameNumDiff; ++i)
 			{
-				m_segments.push(interpolatedSegment);
+				AudioSegment interpolatedSegment{ -1, -1, -1 };
+				if (InterpolateAudio(newAudioSegment, i, interpolatedSegment))
+				{
+					m_segments.push(interpolatedSegment);
+				}
+				else
+				{
+					// No way to interpolate, has to repeat the latest segment
+					m_segments.push(newAudioSegment);
+				}
 			}
-			else
-			{
-				// No way to interpolate, has to repeat the latest segment
-				m_segments.push(newAudioSegment);
-			}
+
+			// Save the last segment
+			m_lastReceivedSegment = newAudioSegment;
+			lastReceivedSegmentTimestamp = newAudioSegment.timestamp;
 		}
 
-		// Save the last segment
-		m_lastReceivedSegment = newAudioSegment;
+		{
+			std::lock_guard lock2(m_stats_mutex);
+			m_lastReceivedAudioTimestamp = lastReceivedSegmentTimestamp;
+		}
 
-		std::lock_guard lock2(m_stats_mutex);
-		m_lastReceivedAudioTimestamp = m_lastReceivedSegment.timestamp;
 	}
 	else if (frameNumDiff >= 10)
 	{
