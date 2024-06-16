@@ -62,7 +62,11 @@
 		</data>
 		<key>Info.plist</key>
 		<data>
-		05NmEw/P2DGiabgQrNWncaUG++U=
+		J04gVvxqwwzbgYvn80jhIksZfwU=
+		</data>
+		<key>PrivacyInfo.xcprivacy</key>
+		<data>
+		Eq4eiivdfFc9fjHGBSV6laZaNKI=
 		</data>
 	</dict>
 	<key>files2</key>
@@ -219,6 +223,17 @@
 			<key>hash2</key>
 			<data>
 			iqLRrJPbCRRNBvqnLQ2ifa2FwILPkQK4rWtxMqOwGVw=
+			</data>
+		</dict>
+		<key>PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash</key>
+			<data>
+			Eq4eiivdfFc9fjHGBSV6laZaNKI=
+			</data>
+			<key>hash2</key>
+			<data>
+			G6yCf0myuKU1hJG5aYIDvxkXkabxujo6zjsShdUtLRc=
 			</data>
 		</dict>
 	</dict>
