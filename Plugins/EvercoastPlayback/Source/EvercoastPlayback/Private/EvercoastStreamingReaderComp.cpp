@@ -1093,7 +1093,7 @@ void UEvercoastStreamingReaderComp::TickComponent(float DeltaTime, ELevelTick Ti
 					{
 						if (scrutinizeTime)
 						{
-
+							float duration = StreamingGetDuration();
 							// find the closest candidate, this will improve the time matching of final rendered pictures, but will 
 							// drastically reduce the chance finding a pair of matching geom/video frame
 							auto nextResult = m_dataDecoder->PeekResult(1);
@@ -1103,7 +1103,8 @@ void UEvercoastStreamingReaderComp::TickComponent(float DeltaTime, ELevelTick Ti
 								float timeDiff1 = std::max(0.0, dueTimestamp - result->frameTimestamp);
 								nextResult = m_dataDecoder->PeekResult(1);
 								float timeDiff2 = std::max(0.0, dueTimestamp - nextResult->frameTimestamp);
-								if (result->DecodeSuccessful && nextResult->DecodeSuccessful && timeDiff2 < timeDiff1)
+								bool isTimeDiff2LargeNegative = dueTimestamp - nextResult->frameTimestamp < -0.5f * duration; // rule out the looping condition
+								if (result->DecodeSuccessful && nextResult->DecodeSuccessful && timeDiff2 < timeDiff1 && !isTimeDiff2LargeNegative)
 								{
 									// then that's a better candidate
 
