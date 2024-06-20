@@ -381,6 +381,7 @@ void UPicoAudioSoundWave::ResetAudio()
 		m_segments = std::queue<AudioSegment>();
 		m_lastReceivedSegment = AudioSegment{ -1, -1, -1 };
 		m_initialTimestamp = 0;
+		m_audioBuffer.Reset();
 
 		m_initialised = false;
 		m_isReady = false;

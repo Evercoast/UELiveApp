@@ -242,6 +242,11 @@ void UPicoQuicStreamingReaderComp::Disconnect()
     if (m_audioComponent && m_audioComponent->Sound)
     {
         m_audioComponent->Stop();
+		if (m_sound)
+		{
+			m_sound->ResetAudio();
+			m_sound = nullptr;
+		}
         m_audioComponent->SetSound(nullptr);
     }
     
