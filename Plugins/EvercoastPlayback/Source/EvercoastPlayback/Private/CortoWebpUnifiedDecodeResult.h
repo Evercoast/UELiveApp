@@ -24,13 +24,15 @@ struct CortoWebpUnifiedDecodeResult : public GenericDecodeResult
 	void Lock() const
 	{
 		meshResult->Lock();
-		imgResult->Lock();
+		if (imgResult->IsValid())
+			imgResult->Lock();
 	}
 
 	void Unlock() const
 	{
-		imgResult->Unlock();
 		meshResult->Unlock();
+		if (imgResult->IsValid())
+			imgResult->Unlock();
 	}
 
 	void SyncWithMeshResult()

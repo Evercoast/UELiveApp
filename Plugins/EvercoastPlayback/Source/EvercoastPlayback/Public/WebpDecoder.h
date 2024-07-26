@@ -13,15 +13,8 @@ public:
 	virtual ~WebpDecodeResult();
 
 	// for thread safety
-	void Lock() const
-	{
-		RWLock.lock();
-	}
-	// for thread safety
-	void Unlock() const
-	{
-		RWLock.unlock();
-	}
+	void Lock() const;
+	void Unlock() const;
 
 	// Applying result transfer the data ownership
 	bool ApplyResult(bool success, double timestamp, int64_t frameIndex, int width, int height, uint8_t bpp, uint8_t* data);

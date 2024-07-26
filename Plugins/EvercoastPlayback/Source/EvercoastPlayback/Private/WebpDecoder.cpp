@@ -33,6 +33,16 @@ WebpDecodeResult::~WebpDecodeResult()
 	}
 }
 
+void WebpDecodeResult::Lock() const
+{
+	RWLock.lock();
+}
+
+void WebpDecodeResult::Unlock() const
+{
+	RWLock.unlock();
+}
+
 bool WebpDecodeResult::ApplyResult(bool success, double timestamp, int64_t frame_index, int width, int height, uint8_t bpp, uint8_t* data)
 {
 	this->DecodeSuccessful = success;
