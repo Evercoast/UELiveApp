@@ -2,6 +2,49 @@
 #include "GhostTreeFormatReader.h"
 #include "RuntimeAudio.h"
 
+FAudioTimer::~FAudioTimer()
+{
+	if (m_audioComp)
+	{
+		m_audioComp->RemoveFromRoot();
+		m_audioComp = nullptr;
+	}
+}
+
+void FAudioTimer::SetAudioComponent(UAudioComponent* audioComponent)
+{
+	if (m_audioComp)
+	{
+		m_audioComp->RemoveFromRoot();
+	}
+
+	m_audioComp = audioComponent;
+	m_audioComp->AddToRoot();
+
+	if (m_callbackHandle.IsValid())
+	{
+		m_audioComp->OnAudioPlaybackPercentNative.Remove(m_callbackHandle);
+		m_callbackHandle.Reset();
+	}
+
+	m_callbackHandle = m_audioComp->OnAudioPlaybackPercentNative.AddSP(this, &FAudioTimer::OnAudioPlaybackPercentage);
+	/*
+	m_callbackHandle = m_audioComp->OnAudioPlaybackPercentNative.AddLambda(
+		[self=this](const UAudioComponent* InComponent, const USoundWave* InSoundWave, const float InPlaybackPercentage) {
+
+			if (InSoundWave)
+				self->m_audioTimestamp = InSoundWave->GetDuration() * InPlaybackPercentage;
+		}
+	);
+	*/
+}
+
+void FAudioTimer::OnAudioPlaybackPercentage(const UAudioComponent* InComponent, const USoundWave* InSoundWave, const float InPlaybackPercentage)
+{
+	if (InSoundWave)
+		m_audioTimestamp = InSoundWave->GetDuration() * InPlaybackPercentage;
+}
+
 float FAudioTimer::GetElapsedTime() const
 {
 	// Check if the sound was runtime imported, or offline assigned
@@ -58,7 +101,7 @@ FTimestampDriver::FTimestampDriver(float duration) :
 	m_overrideMode(OVERRIDEMODE_NONE),
 	m_clipDuration(duration)
 {
-
+	m_audioTimer = MakeShared<FAudioTimer>();
 }
 
 void FTimestampDriver::EnterSequencerTimestampOverride(float overrideTimestamp, float blockOnTime)
@@ -72,7 +115,7 @@ void FTimestampDriver::ExitSequencerTimestampOverride()
 	m_overrideMode = OVERRIDEMODE_NONE;
 	m_sequencerTimer.ResetTimer();
 	m_worldTimer.ResetTimer();
-	m_audioTimer.ResetTimer();
+	m_audioTimer->ResetTimer();
 }
 
 bool FTimestampDriver::IsSequencerOverriding() const
@@ -105,7 +148,7 @@ void FTimestampDriver::UseAudioTimestamps(UAudioComponent* audioComponent)
 {
 	m_baseMode = BASEMODE_AUDIO;
 
-	m_audioTimer.SetAudioComponent(audioComponent);
+	m_audioTimer->SetAudioComponent(audioComponent);
 	ResetTimer();
 }
 
@@ -230,7 +273,7 @@ float FTimestampDriver::GetElapsedTime() const
 		return m_worldTimer.GetElapsedTime();
 		break;
 	case BASEMODE_AUDIO:
-		return m_audioTimer.GetElapsedTime();
+		return m_audioTimer->GetElapsedTime();
 		break;
 	default:
 		UE_LOG(EvercoastReaderLog, Error, TEXT("Uninitialised TimestampDriver"));

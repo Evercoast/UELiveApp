@@ -108,45 +108,31 @@ struct FEvercoastSequencerOverrideTimer
 	float m_loopedTime;
 };
 
-struct FAudioTimer
+struct FAudioTimer : public TSharedFromThis<FAudioTimer>
 {
 	FAudioTimer() :
+		m_audioComp(nullptr),
 		m_audioTimestamp(0)
+		
 	{
 	}
 
-	void SetAudioComponent(UAudioComponent* audioComponent)
-	{
-		m_audioComp = audioComponent;
-		if (m_audioComp.IsValid())
-		{
-			if (m_callbackHandle.IsValid())
-			{
-				m_audioComp->OnAudioPlaybackPercentNative.Remove(m_callbackHandle);
-				m_callbackHandle.Reset();
-			}
+	~FAudioTimer();
 
-			auto self = this;
-			m_callbackHandle = m_audioComp->OnAudioPlaybackPercentNative.AddLambda(
-				[self](const UAudioComponent* InComponent, const USoundWave* InSoundWave, const float InPlaybackPercentage) {
-					self->m_audioTimestamp = const_cast<USoundWave*>(InSoundWave)->GetDuration()* InPlaybackPercentage;
-				}
-			);
-
-		}
-	}
-
-
+	void SetAudioComponent(UAudioComponent* audioComponent);
 	float GetElapsedTime() const;
-
 	void ResetTimer()
 	{
 		m_audioTimestamp = 0;
 	}
 
-	TSoftObjectPtr<UAudioComponent>		m_audioComp;
+
+	UAudioComponent*					m_audioComp;
 	float								m_audioTimestamp;
 	FDelegateHandle						m_callbackHandle;
+private:
+	void OnAudioPlaybackPercentage(const UAudioComponent* InComponent, const USoundWave* InSoundWave, const float InPlaybackPercentage);
+
 };
 
 class FTimestampDriver
@@ -188,7 +174,7 @@ private:
 	};
 	
 	FEvercoastPlaybackTimer				m_worldTimer;
-	FAudioTimer							m_audioTimer;
+	TSharedPtr<FAudioTimer>				m_audioTimer;
 	FEvercoastSequencerOverrideTimer	m_sequencerTimer;
 	
 	BaseMode							m_baseMode;

@@ -321,7 +321,7 @@ private:
 	std::future<void> m_fileOpenFuture;
 
 
-	TSharedPtr<FTimestampDriver, ESPMode::NotThreadSafe> m_timestampDriver;
+	TSharedPtr<FTimestampDriver, ESPMode::ThreadSafe> m_timestampDriver;
 	float m_geomFeedStarvingStartTime;
 
 	enum CortoTextureSeekStage

@@ -685,7 +685,7 @@ void UEvercoastStreamingReaderComp::NotifyReceivedChannelsInfo()
 	}
 
 	// By the time ghost tree reader should already get the "corrected" clip duration
-	m_timestampDriver = MakeShared<FTimestampDriver, ESPMode::NotThreadSafe>(m_reader->GetDuration());
+	m_timestampDriver = MakeShared<FTimestampDriver, ESPMode::ThreadSafe>(m_reader->GetDuration());
 	
 	if (m_baseDecoder && m_baseDecoder->GetType() == DT_CortoMesh)
 	{
