@@ -29,7 +29,8 @@ FString UFileDialogLibrary::OpenFileDialog()
 
         if (bOpened && OutFiles.Num() > 0)
         {
-            FilePath = OutFiles[0];
+            // Return an absolute path to avoid issues
+            FilePath = FPaths::ConvertRelativePathToFull(OutFiles[0]);
         }
     }
 
