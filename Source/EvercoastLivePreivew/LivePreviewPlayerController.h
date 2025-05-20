@@ -84,6 +84,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Gameplay)
 	AActor* LivestreamRoot;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Gameplay)
+	AActor* GaussianRoot;
+
 	UFUNCTION(BlueprintCallable, Category = Camera)
 	void SetCameraWalkingInterpDuration(float duration);
 
@@ -130,7 +133,7 @@ public:
 	void SwitchToArcballCameraMode(float autoRotateSpeed);
 
 	UFUNCTION(BlueprintCallable, Category = Gameplay)
-	void SwitchToFixedCameraMode();
+	void SwitchToFixedCameraMode(AActor* RepositionTarget);
 
 	UFUNCTION(BlueprintImplementableEvent, BlueprintAuthorityOnly, meta = (DisplayName = "SpawnArcballPawn"))
 	AArcballPawn* OnSpawnArcballPawn();
@@ -139,11 +142,11 @@ public:
 	ADefaultPawn* OnSpawnFirstPersonPawn();
 
 	UFUNCTION(BlueprintImplementableEvent, BlueprintAuthorityOnly, meta = (DisplayName = "SpawnRepositionFixedPawn"))
-	ARepositionFixedPawn* OnSpawnRepositionFixedPawn();
+	ARepositionFixedPawn* OnSpawnRepositionFixedPawn(AActor* RepositionTarget);
 
 	UFUNCTION(BlueprintCallable, Category = Gameplay)
-	void RotateLivestreamRootByMouseDelta(float mouseX);
+	void RotateTargetByMouseDelta(AActor* RotateTarget, float mouseX);
 
 	UFUNCTION(BlueprintCallable, Category = Gameplay)
-	bool MoveLivestreamRootByDeprojectingScreenPosition(float screenX, float screenY);
+	bool MoveTargetByDeprojectingScreenPosition(AActor* MoveTarget, float screenX, float screenY);
 };

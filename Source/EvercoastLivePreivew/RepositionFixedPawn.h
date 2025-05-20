@@ -26,6 +26,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Misc)
 	bool DisableMoving;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Misc)
+	AActor* RepositionTarget;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupPlayerInputComponent(UInputComponent* InputComponent) override;

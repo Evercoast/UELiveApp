@@ -99,7 +99,7 @@ void ARepositionFixedPawn::RotateZFromMouseDelta(float X, float Z)
 		{
 			check(PlayerController->PlayerCameraManager);
 
-			PlayerController->RotateLivestreamRootByMouseDelta(X);
+			PlayerController->RotateTargetByMouseDelta(RepositionTarget, X);
 		}
 	}
 }
@@ -137,7 +137,7 @@ void ARepositionFixedPawn::RepositionXYFromMousePosition(const FVector2D& MouseL
 {
 	if (ALivePreviewPlayerController* PlayerController = Cast<ALivePreviewPlayerController>(Controller))
 	{
-		if (PlayerController->MoveLivestreamRootByDeprojectingScreenPosition(MouseLoc.X, MouseLoc.Y))
+		if (PlayerController->MoveTargetByDeprojectingScreenPosition(RepositionTarget, MouseLoc.X, MouseLoc.Y))
 		{
 			// success
 		}

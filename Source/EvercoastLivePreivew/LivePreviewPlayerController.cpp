@@ -324,11 +324,11 @@ void ALivePreviewPlayerController::SwitchToArcballCameraMode(float autoRotateSpe
 }
 
 
-void ALivePreviewPlayerController::SwitchToFixedCameraMode()
+void ALivePreviewPlayerController::SwitchToFixedCameraMode(AActor* RepositionTarget)
 {
 	APawn* currentPawn = GetPawn();
 
-	APawn* newPawn = OnSpawnRepositionFixedPawn();
+	APawn* newPawn = OnSpawnRepositionFixedPawn(RepositionTarget);
 	if (!newPawn)
 	{
 		FActorSpawnParameters params;
@@ -382,23 +382,23 @@ void ALivePreviewPlayerController::SetPawn(APawn* InPawn)
 	Super::SetPawn(InPawn);
 }
 
-void ALivePreviewPlayerController::RotateLivestreamRootByMouseDelta(float mouseZ)
+void ALivePreviewPlayerController::RotateTargetByMouseDelta(AActor* RotateTarget, float mouseZ)
 {
-	if (LivestreamRoot)
+	if (RotateTarget)
 	{
-		FTransform newTransform = LivestreamRoot->GetActorTransform();
+		FTransform newTransform = RotateTarget->GetActorTransform();
 		FQuat newRotation = newTransform.GetRotation();
 		newRotation = newRotation * FQuat::MakeFromEuler(FVector(0, 0, mouseZ));
 		newTransform.SetRotation(newRotation);
-		LivestreamRoot->SetActorTransform(newTransform);
+		RotateTarget->SetActorTransform(newTransform);
 	}
 }
 
 
-bool ALivePreviewPlayerController::MoveLivestreamRootByDeprojectingScreenPosition(float screenX, float screenY)
+bool ALivePreviewPlayerController::MoveTargetByDeprojectingScreenPosition(AActor* MoveTarget, float screenX, float screenY)
 {
 	ALivePreviewPlayerCameraManager* thePlayerCameraManager = Cast<ALivePreviewPlayerCameraManager>(PlayerCameraManager);
-	if (!thePlayerCameraManager || !LivestreamRoot)
+	if (!thePlayerCameraManager || !MoveTarget)
 		return false;
 
 	FVector2D MouseLoc(screenX, screenY);
@@ -416,9 +416,9 @@ bool ALivePreviewPlayerController::MoveLivestreamRootByDeprojectingScreenPositio
 			{
 				thePlayerCameraManager->SaveCurrentCameraPOV();
 				
-				FTransform newTransform = LivestreamRoot->GetActorTransform();
+				FTransform newTransform = MoveTarget->GetActorTransform();
 				newTransform.SetLocation(HitResult.Location);
-				LivestreamRoot->SetActorTransform(newTransform);
+				MoveTarget->SetActorTransform(newTransform);
 				return true;
 			}
 		}
@@ -432,9 +432,9 @@ bool ALivePreviewPlayerController::MoveLivestreamRootByDeprojectingScreenPositio
 			{
 				thePlayerCameraManager->SaveCurrentCameraPOV();
 
-				FTransform newTransform = LivestreamRoot->GetActorTransform();
+				FTransform newTransform = MoveTarget->GetActorTransform();
 				newTransform.SetLocation(HitResult.Location);
-				LivestreamRoot->SetActorTransform(newTransform);
+				MoveTarget->SetActorTransform(newTransform);
 				return true;
 			}
 		}
