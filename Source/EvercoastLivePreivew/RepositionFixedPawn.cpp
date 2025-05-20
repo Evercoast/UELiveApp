@@ -71,13 +71,18 @@ void ARepositionFixedPawn::OnMouseMoving(FVector Value)
 	{
 		if (ALivePreviewPlayerController* PlayerController = Cast<ALivePreviewPlayerController>(Controller))
 		{
+			if (RepositionXYModifier && RotationZModifier)
+			{
+				// Scale
+				UniformScaleFromMouseDelta(Value.Y / PlayerController->PlayerInput->GetMouseSensitivityY() * 0.01f);
+			}
 			if (RepositionXYModifier)
 			{
 				ExtrapolatedMouseLocation.X += Value.X;
 				ExtrapolatedMouseLocation.Y -= Value.Y;
 				RepositionXYFromMousePosition(ExtrapolatedMouseLocation);
 			}
-
+			else
 			if (RotationZModifier)
 			{
 				RotateZFromMouseDelta(Value.X / PlayerController->PlayerInput->GetMouseSensitivityX(), 
@@ -87,6 +92,21 @@ void ARepositionFixedPawn::OnMouseMoving(FVector Value)
 	}
 }
 
+void ARepositionFixedPawn::UniformScaleFromMouseDelta(float Delta)
+{
+	if (IgnoreInput)
+		return;
+
+	if (Delta != 0.0f)
+	{
+		if (ALivePreviewPlayerController* PlayerController = Cast<ALivePreviewPlayerController>(Controller))
+		{
+			check(PlayerController->PlayerCameraManager);
+
+			PlayerController->UniformScaleTargetByMouseDelta(RepositionTarget, Delta);
+		}
+	}
+}
 
 void ARepositionFixedPawn::RotateZFromMouseDelta(float X, float Z)
 {

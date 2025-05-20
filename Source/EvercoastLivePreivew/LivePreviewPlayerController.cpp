@@ -304,10 +304,10 @@ void ALivePreviewPlayerController::SwitchToArcballCameraMode(float autoRotateSpe
 
 		SetControlRotation(initialRotator);
 
-		// ArcballPawn will be set to the livestream actor's place with offset
-		if (LivestreamRoot)
+		// ArcballPawn will be set to the ActorballCentre actor's place with offset
+		if (ArcballCenter)
 		{
-			newPawn->SetActorLocation(LivestreamRoot->GetActorLocation() + FVector(0, 0, InitialCameraOffsetZ));
+			newPawn->SetActorLocation(ArcballCenter->GetActorLocation() + FVector(0, 0, InitialCameraOffsetZ));
 		}
 	}
 
@@ -380,6 +380,30 @@ void ALivePreviewPlayerController::OnPossess(APawn* pawn)
 void ALivePreviewPlayerController::SetPawn(APawn* InPawn)
 {
 	Super::SetPawn(InPawn);
+}
+
+void ALivePreviewPlayerController::UniformScaleTargetByMouseDelta(AActor* ScaleTarget, float Delta)
+{
+
+	if (ScaleTarget)
+	{
+		FTransform newTransform = ScaleTarget->GetActorTransform();
+		FVector currScale = newTransform.GetScale3D();
+		float newScaleScalar = currScale.X + Delta;
+		
+		if (newScaleScalar < 0.25f)
+		{
+			newScaleScalar = 0.25f;
+		}
+		if (newScaleScalar > 4.0f)
+		{
+			newScaleScalar = 4.0f;
+		}
+		
+		newTransform.SetScale3D(FVector(newScaleScalar, newScaleScalar, newScaleScalar));
+
+		ScaleTarget->SetActorTransform(newTransform);
+	}
 }
 
 void ALivePreviewPlayerController::RotateTargetByMouseDelta(AActor* RotateTarget, float mouseZ)

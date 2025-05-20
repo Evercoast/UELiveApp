@@ -26,9 +26,6 @@ public:
 	virtual SIZE_T GetTypeHash() const;
 	virtual FPrimitiveViewRelevance GetViewRelevance(const FSceneView* View) const override;
 
-	static FBoxSphereBounds GetDefaultLocalBounds();
-	FBoxSphereBounds GetLocalBounds() const;
-
 protected:
 	const FViewMatrices& ExtractRelevantViewMatrices(const FSceneView* pView) const;
 

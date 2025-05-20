@@ -87,6 +87,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Gameplay)
 	AActor* GaussianRoot;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Gameplay)
+	AActor* ArcballCenter;
+
 	UFUNCTION(BlueprintCallable, Category = Camera)
 	void SetCameraWalkingInterpDuration(float duration);
 
@@ -149,4 +152,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = Gameplay)
 	bool MoveTargetByDeprojectingScreenPosition(AActor* MoveTarget, float screenX, float screenY);
+
+	UFUNCTION(BlueprintCallable, Category = Gameplay)
+	void UniformScaleTargetByMouseDelta(AActor* ScaleTarget, float Delta);
 };

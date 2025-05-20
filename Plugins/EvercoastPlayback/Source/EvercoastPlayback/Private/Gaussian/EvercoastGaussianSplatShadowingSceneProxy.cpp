@@ -44,16 +44,3 @@ const FViewMatrices& FEvercoastGaussianSplatShadowingSceneProxy::ExtractRelevant
 {
 	return pView->ShadowViewMatrices;
 }
-
-static FBoxSphereBounds defaultBounds(FBox(FVector(-200, -200, -200), FVector(200, 200, 200)));
-FBoxSphereBounds FEvercoastGaussianSplatShadowingSceneProxy::GetDefaultLocalBounds()
-{
-	return defaultBounds;
-}
-
-FBoxSphereBounds FEvercoastGaussianSplatShadowingSceneProxy::GetLocalBounds() const
-{
-	// TODO: return the read back GPU data
-	return defaultBounds;
-}
-

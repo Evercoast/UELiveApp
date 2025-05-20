@@ -50,4 +50,5 @@ protected:
 private:
 	void RotateZFromMouseDelta(float X, float Z);
 	void RepositionXYFromMousePosition(const FVector2D& MouseLoc);
+	void UniformScaleFromMouseDelta(float Delta);
 };
