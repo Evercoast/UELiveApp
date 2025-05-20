@@ -27,6 +27,9 @@
 #include "RuntimeAudioFactory.h"
 #include "RuntimeAudio.h"
 
+#include "zstd.h"
+#include "Gaussian/EvercoastGaussianSplatDecoder.h"
+
 DEFINE_LOG_CATEGORY(EvercoastReaderLog);
 bool UGhostTreeFormatReader::s_initialised = false;
 static std::map<GTHandle, UGhostTreeFormatReader*> s_readerRegistry;
@@ -111,7 +114,7 @@ public:
 
 	static void on_last_block(GTHandle reader_inst, uint32_t channel_id)
 	{
-
+		find_reader(reader_inst)->OnLastBlock(channel_id);
 	}
 
 	static void on_cache_update(GTHandle reader_inst, double cached_until)
@@ -163,7 +166,11 @@ public:
 	{
 		// Unbind all lambdas before shutting down the request
 		m_requestRef->OnProcessRequestComplete().Unbind();
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4
+		m_requestRef->OnRequestProgress64().Unbind();
+#else
 		m_requestRef->OnRequestProgress().Unbind();
+#endif
 		m_requestRef->OnRequestWillRetry().Unbind();
 		m_requestRef->OnHeaderReceived().Unbind();
 		m_requestRef->CancelRequest();
@@ -460,7 +467,7 @@ const uint8_t* UGhostTreeFormatReader::ReaderMemoryCache::GetRange(uint32_t cach
 
 //////////////////////////////////////////////////////////////////////////////////////////
 // UGhostTreeFormatReader
-UGhostTreeFormatReader* UGhostTreeFormatReader::Create(bool inEditor, UAudioComponent* audioComponent, int32 maxCacheSizeInMB)
+UGhostTreeFormatReader* UGhostTreeFormatReader::Create(bool inEditor, UAudioComponent* audioComponent, int32 maxCacheSizeInMB, UObject* Outter)
 {
 	if (!UGhostTreeFormatReader::s_initialised)
 	{
@@ -468,7 +475,7 @@ UGhostTreeFormatReader* UGhostTreeFormatReader::Create(bool inEditor, UAudioComp
 		UGhostTreeFormatReader::s_initialised = true;
 	}
 	
-	UGhostTreeFormatReader* reader = NewObject<UGhostTreeFormatReader>();
+	UGhostTreeFormatReader* reader = NewObject<UGhostTreeFormatReader>(Outter);
 	reader->Init(create_reader_instance(), inEditor, audioComponent, maxCacheSizeInMB);
 	return reader;
 }
@@ -492,8 +499,7 @@ UGhostTreeFormatReader::UGhostTreeFormatReader(const FObjectInitializer&) :
 	m_playbackReady(false),
 	m_mainChannelDataReady(false),
 	m_currTimestamp(0),
-	m_currSeekingTarget(-1),
-	m_outstandingSeekingTarget(-1),
+	m_currSeekingTarget(0),
 	m_initSeekingTarget(0),
 	m_inSeeking(false),
 	m_mainChannelDuration(0),
@@ -508,7 +514,6 @@ UGhostTreeFormatReader::UGhostTreeFormatReader(const FObjectInitializer&) :
 	m_maxCacheSizeInMB(1024),
 	m_preferExternalVideoData(false)
 {
-
 }
 
 void UGhostTreeFormatReader::Init(const GTHandle reader_instance, bool inEditor, UAudioComponent* audioComponent, int32 maxCacheSizeInMB)
@@ -527,7 +532,7 @@ UGhostTreeFormatReader::~UGhostTreeFormatReader()
 {
 	ProcessRequestResults();
 	// finish the last block available before closing
-	FinishCurrentBlock();
+	FinishPendingBlocks();
 	ProcessRequestResults();
 
 	m_dataDecoder = nullptr;
@@ -555,7 +560,6 @@ UGhostTreeFormatReader::~UGhostTreeFormatReader()
 
 	if (m_runtimeAudioDecodeThread)
 	{
-		UE_LOG(EvercoastReaderLog, Verbose, TEXT("Destroy previous decode thread on dtor: %s"), *m_runtimeAudioDecodeThread->GetThreadName());
 		m_runtimeAudioDecodeThread->Kill(true);
 		m_runtimeAudioDecodeThread.reset();
 	}
@@ -570,7 +574,7 @@ void UGhostTreeFormatReader::OnReaderEvent(ECReaderEvent event)
 	{
 	case EC_STREAMING_EVENT_PLAYBACK_READY:
 		eventName = "PlaybackReady";
-		UE_LOG(EvercoastReaderLog, Log, TEXT("Event: %s=%d"), *eventName, (int)event);
+		UE_LOG(EvercoastReaderLog, Verbose, TEXT("Event: %s=%d"), *eventName, (int)event);
 		if (!m_playbackReady)
 		{
 			m_playbackReady = true;
@@ -583,7 +587,7 @@ void UGhostTreeFormatReader::OnReaderEvent(ECReaderEvent event)
 
 	case EC_STREAMING_EVENT_INSUFFICIENT_CACHE:
 		eventName = "InsufficientCache";
-		UE_LOG(EvercoastReaderLog, Log, TEXT("Event: %s=%d"), *eventName, (int)event);
+		UE_LOG(EvercoastReaderLog, Verbose, TEXT("Event: %s=%d"), *eventName, (int)event);
 		return;
 
 	case EC_STREAMING_EVENT_ERROR_UNKNOWN:
@@ -932,6 +936,11 @@ void UGhostTreeFormatReader::OnChannelsReceived(uint32_t count, ChannelInfo* cha
 	m_volumetricChannelBitRates.Empty();
 	m_availableFrameRates.Empty();
 
+	// Clean the runtime audio if provided
+	if (m_audioComponent)
+		m_audioComponent->SetSound(nullptr);
+	m_audioChannelDuration = 0;
+
 	// first loop to deal with main volumetric/geom data
 	for (uint32_t i = 0; i < count; ++i)
 	{
@@ -1210,10 +1219,14 @@ void UGhostTreeFormatReader::OnChannelsReceived(uint32_t count, ChannelInfo* cha
 
 	if (mainChannelSelected)
 	{
-		// resize decoder buffer to match video decoder's setting
+		// resize decoder buffer to match video decoder's setting, 1 sec before cursor and 1 sec after cursor
 		if (m_dataDecoder)
 		{
-			m_dataDecoder->ResizeBuffer(m_mainChannelSampleRate * 2);
+			// feed with 2 x frame rate for both 1s before cursor and 1s after cursor's frame
+			// and query width is 1/2 frame interval
+			m_dataDecoder->ResizeBuffer(m_mainChannelSampleRate * 2, 0.5 / m_mainChannelSampleRate);
+
+			
 		}
 	
 		// initiate reading
@@ -1267,7 +1280,6 @@ void UGhostTreeFormatReader::OnBlockReceived(ChannelDataBlock data_block)
 	{
 		
 		// send data and data_size to decoder and get the result
-		m_currentBlock.MainBlock = data_block;
 		if (m_dataDecoder)
 		{
 			UE_LOG(EvercoastReaderLog, Verbose, TEXT("Decoding voxels at time: %.2f block: %d channel: %d repr: %d"),
@@ -1276,11 +1288,54 @@ void UGhostTreeFormatReader::OnBlockReceived(ChannelDataBlock data_block)
             // Extract frame number from block data
             uint32_t frameNumber = data[data_size - 1] << 24 | data[data_size - 2] << 16 | data[data_size - 3] << 8 | data[data_size - 4];
 			m_dataDecoder->Receive(data_block.timestamp, GetFrameIndex(data_block.timestamp, GetFrameRate()), data, data_size, DECODE_META_NONE);
+			
+			if (!m_dataDecoder->IsGoingToBeFull())
+			{
+				std::lock_guard<std::recursive_mutex> guard(m_pendingReleaseBlocksLock);
+				// put request next frame into pending list, to be processed in Tick()
+				m_pendingDataBlocksToRelease.push_back(data_block);
+
+				UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("Continue request more GEOM blocks after: %.2f block id: %d"), data_block.timestamp, data_block.block_id);
+			}
+			else
+			{
+				UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("Data decoder cache is full, no more requesting new GEOM blocks. Saved block: %.2f block id: %d"), data_block.timestamp, data_block.block_id);
+				m_lastBlockStub.MainBlock = data_block;
+			}
+		}
+		else
+		{
+
+			UE_LOG(EvercoastReaderLog, Warning, TEXT("Main channel: %d has not been assigned decoder! Throw away block: %d"), data_block.channel_id, data_block.block_id);
+
+			/*
+			// Try feed raw bytes to zstd
+			auto decompressedSize = ZSTD_getFrameContentSize(data, data_size);
+			if (decompressedSize == ZSTD_CONTENTSIZE_ERROR || decompressedSize == ZSTD_CONTENTSIZE_UNKNOWN)
+			{
+				UE_LOG(EvercoastReaderLog, Error, TEXT("Getting frame compressed metadata error. Data: %P, Size: %d"), data, data_size);
+			}
+			else
+			{
+				uint8_t* rawBytes = new uint8_t[decompressedSize];
+				auto actualDecompressedSize = ZSTD_decompress(rawBytes, decompressedSize, data, data_size);
+
+				// rawBytes should contain an ECSPZ frame
+				ECSpzHeader* header = (ECSpzHeader*)rawBytes;
+				UE_LOG(EvercoastReaderLog, Log, TEXT("SPZ header magic: 0x%08x version: %d pointCount: %d frameNumber: %d"), header->magic, header->version, header->pointCount, header->frameNumber);
+				delete[] rawBytes;
+			}
+			*/
+
+			// Not supported codec/or in validation process, (no data decoder) throw the block to m_pendingDataBlocksToRelease
+			std::lock_guard<std::recursive_mutex> guard(m_pendingReleaseBlocksLock);
+
+			m_pendingDataBlocksToRelease.push_back(data_block);
 		}
 
-		m_currTimestamp = (float)m_currentBlock.MainBlock.timestamp;
+		m_currTimestamp = (float)data_block.timestamp;
 
-		m_currRepresentationId = m_currentBlock.MainBlock.representation_id;
+		m_currRepresentationId = data_block.representation_id;
 
 		// check if the seeking target meets
 		if (m_inSeeking)
@@ -1292,20 +1347,14 @@ void UGhostTreeFormatReader::OnBlockReceived(ChannelDataBlock data_block)
 				{
 					m_statusCallback->OnInSeekingChanged(m_inSeeking);
 				}
-				UE_LOG(EvercoastReaderLog, Log, TEXT("Seek to %.3f - %.3f finished"), m_currSeekingTarget, data_block.timestamp);
+				auto it = m_seekCallbacks.find(data_block.timestamp);
+				if ( it != m_seekCallbacks.end())
+				{
+					(*it).second();
+					m_seekCallbacks.erase(it);
+				}
+				UE_LOG(EvercoastReaderLog, Verbose, TEXT("Seek to %.3f - %.3f finished"), m_currSeekingTarget, data_block.timestamp);
 			}
-			else
-			{
-				// re-issue seek request
-				m_outstandingSeekingTarget = m_currSeekingTarget;
-				// make sure outstanding seeking target is within range
-				m_outstandingSeekingTarget = std::max(0.0f, std::min(m_outstandingSeekingTarget, m_mainChannelDuration));
-				UE_LOG(EvercoastReaderLog, Log, TEXT("Checking seeking target, outstanding seeking target set to %.3f"), m_outstandingSeekingTarget);
-			}
-		}
-		else
-		{
-			m_currSeekingTarget = m_currTimestamp;
 		}
 
 		if (!m_mainChannelDataReady)
@@ -1319,14 +1368,26 @@ void UGhostTreeFormatReader::OnBlockReceived(ChannelDataBlock data_block)
 	}
 	else if (data_block.channel_id == m_textureChannelId)
 	{
-		m_currentBlock.TextureBlock = data_block;
-
 		if (m_dataDecoder)
 		{
 			UE_LOG(EvercoastReaderLog, Verbose, TEXT("Decoding texture at time: %.2f block: %d channel: %d repr: %d"),
 				data_block.timestamp, data_block.block_id, data_block.channel_id, data_block.representation_id);
 
 			m_dataDecoder->Receive(data_block.timestamp, GetFrameIndex(data_block.timestamp, GetFrameRate()), data, data_size, DECODE_META_IMAGE_WEBP);
+
+			if (!m_dataDecoder->IsGoingToBeFull())
+			{
+				std::lock_guard<std::recursive_mutex> guard(m_pendingReleaseBlocksLock);
+				// put request next frame into pending list, to be processed in Tick()
+				m_pendingDataBlocksToRelease.push_back(data_block);
+
+				UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("Continue request more TEX blocks after: %.2f, block id: %d"), data_block.timestamp, data_block.block_id);
+			}
+			else
+			{
+				UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("Data decoder cache is full, no more requesting new TEX blocks. Saved block: %.2f, block_id: %d"), data_block.timestamp, data_block.block_id);
+				m_lastBlockStub.TextureBlock = data_block;
+			}
 		}
 	}
 	else if (data_block.channel_id == m_audioChannelId)
@@ -1406,77 +1467,46 @@ void UGhostTreeFormatReader::OnBlockReceived(ChannelDataBlock data_block)
 		// Avoid calling reader_finished_with_block() otherwise in some scenarios like Sequencer it will
 		// cause reading subsequent block going to be end up here unprocessed, then stack overflow
 		//reader_finished_with_block(m_instance, data_block.block_id);
-		m_currentBlock.UnusedBlocks.push_back(data_block);
+
+		std::lock_guard<std::recursive_mutex> guard(m_pendingReleaseBlocksLock);
+		// put request next frame into pending list, to be processed in Tick()
+		m_pendingDataBlocksToRelease.push_back(data_block);
 	}
 }
 
-void UGhostTreeFormatReader::DataBlocks::ReleaseAllBlocks(GTHandle readerInstance)
+
+void UGhostTreeFormatReader::FinishPendingBlocks()
 {
-	if (MainBlock.block_id != -1 && MainBlock.size > 0)
+	std::lock_guard<std::recursive_mutex> guard(m_pendingReleaseBlocksLock);
+
+	// Since reader_finished_with_block() will callback OnBlockReceived, here we need index based iteration to handle
+	// new items
+	for(size_t i = 0; i < m_pendingDataBlocksToRelease.size(); ++i)
 	{
-		UE_LOG(EvercoastReaderLog, Verbose, TEXT("Finish with main block(well processed): block_id: %d"), MainBlock.block_id);
-		auto block_id = MainBlock.block_id;
-		// must clear the current block before calling finished_with_block(), which in turn will trigger on_block_received
-		MainBlock.block_id = -1;
-		MainBlock.size = 0;
-
-		reader_finished_with_block(readerInstance, block_id);
+		ChannelDataBlock& block = m_pendingDataBlocksToRelease[i];
+		UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("Finish pending block id: %d"), block.block_id);
+		reader_finished_with_block(m_instance, block.block_id);
 	}
-
-	if (TextureBlock.block_id != -1 && TextureBlock.size > 0)
-	{
-		UE_LOG(EvercoastReaderLog, Verbose, TEXT("Finish with texture block(well processed): block_id: %d"), TextureBlock.block_id);
-		auto block_id = TextureBlock.block_id;
-		// must clear the current block before calling finished_with_block(), which in turn will trigger on_block_received
-		TextureBlock.block_id = -1;
-		TextureBlock.size = 0;
-
-		reader_finished_with_block(readerInstance, block_id);
-	}
-
-	for (const auto& block : UnusedBlocks)
-	{
-		reader_finished_with_block(readerInstance, block.block_id);
-	}
-}
-
-void UGhostTreeFormatReader::DataBlocks::Invalidate(uint32_t blockId)
-{
-	if (MainBlock.block_id == blockId)
-	{
-		MainBlock.block_id = -1;
-		MainBlock.size = 0;
-	}
-
-	if (TextureBlock.block_id == blockId)
-	{
-		TextureBlock.block_id = -1;
-		TextureBlock.size = 0;
-	}
-
-	UnusedBlocks.clear();
-}
-
-void UGhostTreeFormatReader::FinishCurrentBlock()
-{
-	m_currentBlock.ReleaseAllBlocks(m_instance);
-}
-
-void UGhostTreeFormatReader::RequestFrameNext()
-{
-	// finishing the last block will just kick off next frame
-	FinishCurrentBlock();
+	m_pendingDataBlocksToRelease.clear();
 }
 
 bool UGhostTreeFormatReader::RequestFrameOnTimestamp(float timestamp)
 {
 	if (m_currMode != OperatingMode::None)
 	{
-		UE_LOG(EvercoastReaderLog, Log, TEXT("Request seek to %.3f"), timestamp);
+		UE_LOG(EvercoastReaderLog, Verbose, TEXT("Request seek to %.2f"), timestamp);
 
-		FinishCurrentBlock();
+		FinishPendingBlocks();
 
 		m_currSeekingTarget = timestamp;
+
+		// Always set to the real timestamp to 1 sec before the requrested, this is aligned with the frame caching algorithm
+		float timestampIncludingPrecache = timestamp - 1.0f;
+		if (timestampIncludingPrecache < 0)
+		{
+			timestampIncludingPrecache = 0;
+		}
+
 		if (!m_inSeeking)
 		{
 			m_inSeeking = true;
@@ -1505,21 +1535,64 @@ bool UGhostTreeFormatReader::RequestFrameOnTimestamp(float timestamp)
 		}
 
 		// call seek() at the last, as it in turn calls on_event
-		reader_seek(m_instance, (double)timestamp);
+		reader_seek(m_instance, (double)timestampIncludingPrecache);
 		return true;
 	}
 
 	return false;
 }
 
+
+bool UGhostTreeFormatReader::RequestFrameOnTimestamp(float timestamp, const std::function<void()>& callback)
+{
+	m_seekCallbacks[timestamp] = callback;
+	return RequestFrameOnTimestamp(timestamp);
+}
+
+void UGhostTreeFormatReader::ContinueRequest()
+{
+	if (m_dataDecoder && !m_dataDecoder->IsGoingToBeFull())
+	{
+		std::lock_guard<std::recursive_mutex> guard(m_pendingReleaseBlocksLock);
+		// put request next frame into pending list, to be processed in Tick()
+		if (m_lastBlockStub.MainBlock.block_id != (uint32_t)-1)
+		{
+			UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("Continue request from Main Block: %d timestamp: %.2f"), m_lastBlockStub.MainBlock.block_id, m_lastBlockStub.MainBlock.timestamp);
+			m_pendingDataBlocksToRelease.push_back(m_lastBlockStub.MainBlock);
+			m_lastBlockStub.ClearMainBlock();
+		}
+		if (m_lastBlockStub.TextureBlock.block_id != (uint32_t)-1)
+		{
+			UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("Continue request from Tex Block: %d timestamp: %.2f"), m_lastBlockStub.TextureBlock.block_id, m_lastBlockStub.TextureBlock.timestamp);
+			m_pendingDataBlocksToRelease.push_back(m_lastBlockStub.TextureBlock);
+			m_lastBlockStub.ClearTextureBlock();
+		}
+	}
+}
+
 void UGhostTreeFormatReader::OnBlockInvalidated(uint32_t block_id)
 {
-	UE_LOG(EvercoastReaderLog, Verbose, TEXT("Block invalidated: block_id: %d"), block_id);
-	// We should be fine safely assuming block is already freed by reader??
-	//reader_finished_with_block(m_instance, m_currentBlock.block_id);
+	UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("Block invalidated: block_id: %d"), block_id);
 	
-	m_currentBlock.Invalidate(block_id);
+	//m_currentBlock.Invalidate(block_id);
+	std::lock_guard<std::recursive_mutex> guard(m_pendingReleaseBlocksLock);
+
+	m_pendingDataBlocksToRelease.erase(std::remove_if(m_pendingDataBlocksToRelease.begin(), m_pendingDataBlocksToRelease.end(),
+		[block_id](ChannelDataBlock block) {
+			return block.block_id == block_id;
+		}), m_pendingDataBlocksToRelease.end());
+
+
 	m_currRepresentationId = -1;
+}
+
+void UGhostTreeFormatReader::OnLastBlock(uint32_t channel_id)
+{
+	// FIXME: not getting called, maybe only http streaming only??
+	if (channel_id == m_mainChannelId)
+	{
+		// TODO: if universally called, here can be the place for seek back to 0 for looping
+	}
 }
 
 void UGhostTreeFormatReader::OnCacheUpdate(double cached_until)
@@ -1531,7 +1604,7 @@ void UGhostTreeFormatReader::OnFinishedWithCacheId(uint32_t cache_id)
 {
 	if (m_cache->Remove(cache_id))
 	{
-		UE_LOG(EvercoastReaderLog, Log, TEXT("Cache id removed: %d"), cache_id);
+		UE_LOG(EvercoastReaderLog, Verbose, TEXT("Cache id removed: %d"), cache_id);
 	}
 	else
 	{
@@ -1596,7 +1669,7 @@ void UGhostTreeFormatReader::Close()
 
 	ProcessRequestResults();
 	// finish the last block available before closing
-	FinishCurrentBlock();
+	FinishPendingBlocks();
 
 	ProcessRequestResults();
 	reader_close(m_instance);
@@ -1644,8 +1717,7 @@ void UGhostTreeFormatReader::Close()
 		}
 	}
 	m_currTimestamp = 0;
-	m_currSeekingTarget = -1;
-	m_outstandingSeekingTarget = -1;
+	m_currSeekingTarget = 0;
 	m_mainChannelId = -1;
 	m_audioChannelId = -1;
 	m_currRepresentationId = -1;
@@ -1662,18 +1734,15 @@ void UGhostTreeFormatReader::Tick()
 {
 	ProcessRequestResults();
 
-	if (m_outstandingSeekingTarget >= 0)
-	{
-		RequestFrameOnTimestamp(m_outstandingSeekingTarget);
-		m_outstandingSeekingTarget = -1;
-	}
-
 	// remove finished http requests from the list
 	m_savedHttpRequestList.erase(
 		std::remove_if(m_savedHttpRequestList.begin(), m_savedHttpRequestList.end(), [](std::shared_ptr<SavedHttpRequest> request) {
 			return request->IsFinished();
 			}), 
 		m_savedHttpRequestList.end());
+
+	// process all pending blocks
+	FinishPendingBlocks();
 }
 
 
@@ -1717,7 +1786,7 @@ float UGhostTreeFormatReader::GetFrameInterval() const
 	return 1.0f / GetFrameRate();
 }
 
-float UGhostTreeFormatReader::GetFrameRate() const
+uint32_t UGhostTreeFormatReader::GetFrameRate() const
 {
 	if (m_currRepresentationId >= 0 && m_representationIds.find(m_currRepresentationId) != m_representationIds.cend())
 	{
@@ -1725,7 +1794,6 @@ float UGhostTreeFormatReader::GetFrameRate() const
 		return m_cachedLastSampleRate;
 	}
 
-	//UE_LOG(EvercoastReaderLog, Error, TEXT("Cannot get current frame rate. Current representation id: %d"), m_currRepresentationId);
 	return m_cachedLastSampleRate; // return a legacy default framerate, but we should not get here.
 }
 
@@ -1879,6 +1947,10 @@ void UGhostTreeFormatReader::SetInitialSeek(float startTimestamp)
 bool UGhostTreeFormatReader::ValidateLocation(const FString& urlOrFilePath, double timeoutSec)
 {
 	Config config = reader_default_config(m_instance);
+
+	config.max_cache_memory_size = 1024 * 1024 * m_maxCacheSizeInMB;
+	config.progressive_download = false;
+
 	m_dataURL = TCHAR_TO_ANSI(*urlOrFilePath);
 	m_dataDecoder = nullptr;
 	if (urlOrFilePath.EndsWith(".ecm"))
@@ -1896,7 +1968,7 @@ bool UGhostTreeFormatReader::ValidateLocation(const FString& urlOrFilePath, doub
 	if (canOpen)
 	{
 		Tick();
-		RequestFrameNext();
+		FinishPendingBlocks();
 		auto startTime = FDateTime::Now();
 		auto& httpManager = FHttpModule::Get().GetHttpManager();
 		while (true)
@@ -1909,7 +1981,7 @@ bool UGhostTreeFormatReader::ValidateLocation(const FString& urlOrFilePath, doub
 			auto timespan = FDateTime::Now() - startTime;
 			if (IsPlaybackReady())
 			{
-				UE_LOG(EvercoastReaderLog, Log, TEXT("Took %.2f seconds"), timespan.GetTotalSeconds());
+				UE_LOG(EvercoastReaderLog, Log, TEXT("Validation took %.2f seconds"), timespan.GetTotalSeconds());
 				result = true;
 				break;
 			}

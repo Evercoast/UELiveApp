@@ -103,8 +103,8 @@ bool WebpDecoder::DecodeMemoryStream(const uint8_t* stream, size_t stream_size, 
 }
 
 
-std::shared_ptr<GenericDecodeResult> WebpDecoder::GetResult()
+std::shared_ptr<GenericDecodeResult> WebpDecoder::TakeResult()
 {
-	return result;
+	return std::move(result);
 }
 

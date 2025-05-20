@@ -6,30 +6,6 @@
 #include "EvercoastRendererSelectorComp.h"
 #include "EvercoastVolcapActor.h"
 
-void FECVAssetTrackSectionParams::SaveActorProperties()
-{
-	if (ReaderRendererActor && !ReaderRendererActor->IsActorBeingDestroyed())
-	{
-		SavedReaderRendererActor = ReaderRendererActor.LoadSynchronous();
-		if (SavedReaderRendererActor && !SavedReaderRendererActor->IsActorBeingDestroyed())
-		{
-			SavedAsset = SavedReaderRendererActor->Reader->ECVAsset;
-		}
-	}
-}
-
-void FECVAssetTrackSectionParams::RestoreActorProperties() const
-{
-	if (ReaderRendererActor && !ReaderRendererActor->IsActorBeingDestroyed())
-	{
-		if (SavedReaderRendererActor && SavedReaderRendererActor.LoadSynchronous())
-		{
-			SavedReaderRendererActor->Reader->ECVAsset = SavedAsset;
-		}
-	}
-}
-
-
 struct FECVAssetPreRollExecutionToken
 	: IMovieSceneExecutionToken
 {
@@ -45,30 +21,42 @@ public:
 	{
 		FECVAssetPersistentData& SectionData = PersistentData.GetSectionData<FECVAssetPersistentData>();
 
-		UEvercoastStreamingReaderComp* Reader = SectionData.GetEvercoastReader();
-		if (!Reader || !TheAsset)
+		for (TWeakObjectPtr<> WeakObject : Player.FindBoundObjects(Operand))
 		{
-			return;
-		}
+			UObject* BoundObject = WeakObject.Get();
+			if (!BoundObject)
+				continue;
 
-		check(!Reader->IsBeingDestroyed());
+			if (!BoundObject->IsA(AEvercoastVolcapActor::StaticClass()))
+				continue;
 
-		// get duration
-		if (Reader->ECVAsset != TheAsset)
-		{
+			AEvercoastVolcapActor* VolcapActor = Cast<AEvercoastVolcapActor>(BoundObject);
 
-			// crop StartTime
-			FTimespan LocalStartTime = StartTime;
-			while (LocalStartTime  > FullDuration && !FullDuration.IsZero())
+			UEvercoastStreamingReaderComp* Reader = VolcapActor->Reader;
+			if (!Reader || !TheAsset)
 			{
-				LocalStartTime -= FullDuration;
+				continue;
 			}
 
-			Reader->ECVAsset = TheAsset;
-			Reader->SetPlaybackStartTime(LocalStartTime.GetTotalSeconds());
-			Reader->RecreateReaderSync();
-			Reader->StreamingPlay();
-			Reader->StreamingPause();
+			check(!Reader->IsBeingDestroyed());
+
+			// get duration
+			if (Reader->ECVAsset != TheAsset)
+			{
+
+				// crop StartTime
+				FTimespan LocalStartTime = StartTime;
+				while (LocalStartTime > FullDuration && !FullDuration.IsZero())
+				{
+					LocalStartTime -= FullDuration;
+				}
+
+				Reader->ECVAsset = TheAsset;
+				//Reader->SetPlaybackStartTime(LocalStartTime.GetTotalSeconds());
+				Reader->RecreateReaderSync();
+				Reader->StreamingPlay();
+				Reader->StreamingPause();
+			}
 		}
 	}
 
@@ -92,85 +80,108 @@ public:
 	// Run/Seek the playback to position
 	virtual void Execute(const FMovieSceneContext& Context, const FMovieSceneEvaluationOperand& Operand, FPersistentEvaluationData& PersistentData, IMovieScenePlayer& Player) override
 	{
+		// TODO: FIXME Use FMovieSceneEvaluationOperand.ObjectBindingID to resolve to the AEvercoastVolcapActor at runtime/evaluation
 		FECVAssetPersistentData& SectionData = PersistentData.GetSectionData<FECVAssetPersistentData>();
 
-		UEvercoastStreamingReaderComp* Reader = SectionData.GetEvercoastReader();
-		if (!Reader || !TheAsset)
-			return;
-
-		check(!Reader->IsBeingDestroyed());
-
-		// CurrTime is relative timestamp based on the start of the section, when performing SeekTo() and SetPlaybackStartTime() 
-		// we need to crop it back within the range of clip duration in order to do SeekTo() or SetPlaybackStartTime()
-		// SetPlaybackMicroTimeManagement() still uses CurrTime
-		FTimespan LocalCurrTime = CurrTime;
-		while (LocalCurrTime > FullDuration && !FullDuration.IsZero())
+		for (TWeakObjectPtr<> WeakObject : Player.FindBoundObjects(Operand))
 		{
-			LocalCurrTime -= FullDuration;
-		}
-
-
-		// get duration
-		if (Reader->ECVAsset != TheAsset)
-		{
-			Reader->ECVAsset = TheAsset;
-			Reader->SetPlaybackStartTime(LocalCurrTime.GetTotalSeconds());
-			Reader->SetPlaybackMicroTimeManagement(CurrTime.GetTotalSeconds(), FrameDuration.GetTotalSeconds(), (CurrTime + FrameDuration).GetTotalSeconds());
-			Reader->RecreateReaderSync();
-			Reader->StreamingPlay();
-			Reader->StreamingPause();
-			return;
-		}
-
-		Reader->SetPlaybackStartTime(LocalCurrTime.GetTotalSeconds());
-		Reader->SetPlaybackMicroTimeManagement(CurrTime.GetTotalSeconds(), FrameDuration.GetTotalSeconds(), (CurrTime + FrameDuration).GetTotalSeconds());
-		if (Context.GetStatus() == EMovieScenePlayerStatus::Playing)
-		{
-			// play
-			//UE_LOG(EvercoastReaderLog, Log, TEXT("Seq curr time: %.3f, one frame time: %.3f"), CurrTime.GetTotalSeconds(), (CurrTime + FrameDuration).GetTotalSeconds());
-
-			if (!Reader->IsStreamingPlaying())
+			UObject* BoundObject = WeakObject.Get();
+			if (!BoundObject)
 			{
-				// haven't been playing
+				continue;
+			}
+
+			if (!BoundObject->IsA(AEvercoastVolcapActor::StaticClass()))
+			{
+				continue;
+			}
+
+			AEvercoastVolcapActor* VolcapActor = Cast<AEvercoastVolcapActor>(BoundObject);
+
+			UEvercoastStreamingReaderComp* Reader = VolcapActor->Reader;
+			if (!Reader)
+			{
+				continue;
+			}
+
+			if (!Reader || !TheAsset)
+				continue;
+
+			check(!Reader->IsBeingDestroyed());
+
+			// CurrTime is relative timestamp based on the start of the section, when performing SeekTo() and SetPlaybackStartTime() 
+			// we need to crop it back within the range of clip duration in order to do SeekTo() or SetPlaybackStartTime()
+			// SetPlaybackMicroTimeManagement() still uses CurrTime
+			FTimespan LocalCurrTime = CurrTime;
+			while (LocalCurrTime > FullDuration && !FullDuration.IsZero())
+			{
+				LocalCurrTime -= FullDuration;
+			}
+
+
+			// get duration
+			if (Reader->ECVAsset != TheAsset)
+			{
+				Reader->ECVAsset = TheAsset;
+				//Reader->SetPlaybackStartTime(LocalCurrTime.GetTotalSeconds());
+				Reader->SetPlaybackMicroTimeManagement(CurrTime.GetTotalSeconds(), FrameDuration.GetTotalSeconds(), (CurrTime + FrameDuration).GetTotalSeconds());
+				Reader->RecreateReaderSync();
 				Reader->StreamingPlay();
-				Reader->StreamingSeekTo(LocalCurrTime.GetTotalSeconds());
+				Reader->StreamingPause();
+				continue;
+			}
+
+			//Reader->SetPlaybackStartTime(LocalCurrTime.GetTotalSeconds());
+			Reader->SetPlaybackMicroTimeManagement(CurrTime.GetTotalSeconds(), FrameDuration.GetTotalSeconds(), (CurrTime + FrameDuration).GetTotalSeconds());
+			if (Context.GetStatus() == EMovieScenePlayerStatus::Playing)
+			{
+				// play
+				//UE_LOG(EvercoastReaderLog, Log, TEXT("Seq curr time: %.3f, one frame time: %.3f"), CurrTime.GetTotalSeconds(), (CurrTime + FrameDuration).GetTotalSeconds());
+
+				if (!Reader->IsStreamingPlaying())
+				{
+					// haven't been playing
+					Reader->StreamingPlay();
+					Reader->StreamingSeekTo(LocalCurrTime.GetTotalSeconds());
+				}
+				else
+				{
+					// already playing, taking care of jumping/reverse play
+					if (Context.HasJumped())
+					{
+						// only seek when context jumped
+						Reader->StreamingSeekTo(LocalCurrTime.GetTotalSeconds());
+					}
+
+					// Ghost tree reader doesn't support backwards streaming/reading
+					if (Context.GetDirection() == EPlayDirection::Forwards)
+					{
+						if (!Reader->IsStreamingPlaying())
+							Reader->StreamingPlay();
+					}
+					else
+						if (Context.GetDirection() == EPlayDirection::Backwards)
+						{
+							Reader->StreamingPause();
+							Reader->StreamingSeekTo(LocalCurrTime.GetTotalSeconds());
+						}
+
+				}
 			}
 			else
 			{
-				// already playing, taking care of jumping/reverse play
-				if (Context.HasJumped())
-				{
-					// only seek when context jumped
-					Reader->StreamingSeekTo(LocalCurrTime.GetTotalSeconds());
-				}
-
-				// Ghost tree reader doesn't support backwards streaming/reading
-				if (Context.GetDirection() == EPlayDirection::Forwards)
-				{
-					if (!Reader->IsStreamingPlaying())
-						Reader->StreamingPlay();
-				}
-				else
-				if (Context.GetDirection() == EPlayDirection::Backwards)
+				// pause and seek
+				if (Reader->IsStreamingPlaying())
 				{
 					Reader->StreamingPause();
-					Reader->StreamingSeekTo(LocalCurrTime.GetTotalSeconds());
 				}
-				
-			}
-		}
-		else
-		{
-			// pause and seek
-			if (Reader->IsStreamingPlaying())
-			{
-				Reader->StreamingPause();
+
+				Reader->StreamingSeekTo(LocalCurrTime.GetTotalSeconds());
 			}
 
-			Reader->StreamingSeekTo(LocalCurrTime.GetTotalSeconds());
-
-			Reader->RecalcequencerOverrideLoopCount();
 		}
+
+		
 	}
 
 private:
@@ -185,8 +196,6 @@ FECVAssetEvalTemplate::FECVAssetEvalTemplate(const UECVAssetTrackSection& InSect
 	Params.Asset = InSection.Asset;
 
 	// keep track of Reader and Renderer
-	Params.ReaderRendererActor = InSection.ReaderRendererActor;
-	Params.ReaderRendererActor.LoadSynchronous();
 	Params.StartFrameOffset = InSection.StartFrameOffset;
 
 	if (InSection.HasStartFrame())
@@ -199,42 +208,11 @@ FECVAssetEvalTemplate::FECVAssetEvalTemplate(const UECVAssetTrackSection& InSect
 	}
 }
 
-
 void FECVAssetEvalTemplate::Setup(FPersistentEvaluationData& PersistentData, IMovieScenePlayer& Player) const
 {
-	if (Params.ReaderRendererActor)
-	{
-		Params.ReaderRendererActor.LoadSynchronous();
-	}
+	PersistentData.AddSectionData<FECVAssetPersistentData>();
 
-	auto Reader = Params.ReaderRendererActor ? Params.ReaderRendererActor->Reader : nullptr;
-
-	PersistentData.AddSectionData<FECVAssetPersistentData>().AcquireActor(Params.ReaderRendererActor);
-
-	// After fetching the reader, save auto created renderer when this starts, later we have to restore it
-	Params.SaveActorProperties();
-
-	if (Reader)
-	{
-		// Get duration
-		if (Params.FullDuration.IsZero())
-		{
-			Reader->ECVAsset = Params.Asset;
-			Reader->SetPlaybackStartTime(0);
-			Reader->RecreateReaderSync();
-			Reader->StreamingPlay();
-			Reader->StreamingPause();
-
-			// need to wait for streaming duration became reliable to set the proper Params.FullDuration
-			while (!Reader->IsStreamingDurationReliable())
-			{
-				Reader->WaitForDurationBecomesReliable();
-			}
-
-			Params.FullDuration = FTimespan::FromSeconds(Reader->StreamingGetDuration());
-		}
-	}
-
+	Params.bPerformedInitialSeek = false;
 }
 
 void FECVAssetEvalTemplate::SetupOverrides()
@@ -251,44 +229,87 @@ void FECVAssetEvalTemplate::Initialize(const FMovieSceneEvaluationOperand& Opera
 		return;
 	}
 
-	// Check for reader and renderer's validity as they can become trashed from editing
-
 	UEvercoastStreamingReaderComp* Reader = nullptr;
-	if (Params.ReaderRendererActor && Params.ReaderRendererActor.LoadSynchronous() && !Params.ReaderRendererActor->IsActorBeingDestroyed())
+
+	// Check Params.ObjectBindingID and SequenceID and resolve Reader
+	if (!Params.ObjectBindingID.IsValid() || !Params.SequenceID.IsValid())
 	{
-		Reader = Params.ReaderRendererActor->Reader;
+		Params.ObjectBindingID = Operand.ObjectBindingID;
+		Params.SequenceID = Operand.SequenceID;
 	}
 
-	if (!Reader)
-		return;
-
-	UEvercoastRendererSelectorComp* Renderer = nullptr;
-	if (Params.ReaderRendererActor && Params.ReaderRendererActor.LoadSynchronous() && !Params.ReaderRendererActor->IsActorBeingDestroyed())
+	// Runtime resolution of EvercoastVolcapActor::Reader
+	for (TWeakObjectPtr<> WeakObject : Player.FindBoundObjects(Params.ObjectBindingID, Params.SequenceID))
 	{
-		Renderer = Params.ReaderRendererActor->RendererSelector;
-	}
+		UObject* BoundObject = WeakObject.Get();
+		if (!BoundObject)
+			continue;
 
-	
-	UEvercoastStreamingReaderComp* theReader = Reader;
+		if (!BoundObject->IsA(AEvercoastVolcapActor::StaticClass()))
+			continue;
 
-	const bool IsEvaluating = !(Context.IsPreRoll() || Context.IsPostRoll() || (Context.GetTime().FrameNumber >= Params.SectionEndFrame));
+		AEvercoastVolcapActor* VolcapActor = Cast<AEvercoastVolcapActor>(BoundObject);
+		Reader = VolcapActor->Reader;
 
-	if (theReader)
-	{
-		if (IsEvaluating)
+		if (!Reader)
+			continue;
+
+		// Check validity for full duration
+		if (Params.FullDuration.IsZero())
 		{
-			// setup asset first
-			if (theReader->ECVAsset != Params.Asset)
+			Reader->ECVAsset = Params.Asset;
+			Reader->RecreateReaderSync();
+			Reader->StreamingPlay();
+			Reader->StreamingPause();
+
+			// need to wait for streaming duration became reliable to set the proper Params.FullDuration
+			while (!Reader->IsStreamingDurationReliable())
 			{
-				theReader->ECVAsset = Params.Asset;
+				Reader->WaitForDurationBecomesReliable();
+			}
+
+			Params.FullDuration = FTimespan::FromSeconds(Reader->StreamingGetDuration());
+		}
+
+
+		// Initialize the reader
+		UEvercoastStreamingReaderComp* theReader = Reader;
+
+		const bool IsEvaluating = !(Context.IsPreRoll() || Context.IsPostRoll() || (Context.GetTime().FrameNumber >= Params.SectionEndFrame));
+
+		if (theReader)
+		{
+			if (IsEvaluating)
+			{
+				// setup asset first
+				if (theReader->ECVAsset != Params.Asset)
+				{
+					theReader->ECVAsset = Params.Asset;
+					theReader->RecreateReaderSync();
+				}
+			}
+			else
+			{
+				// no evaluating, no asset, but will need to set proper renderer
+				theReader->ECVAsset = nullptr;
 				theReader->RecreateReaderSync();
 			}
-		}
-		else
-		{
-			// no evaluating, no asset, but will need to set proper renderer
-			theReader->ECVAsset = nullptr;
-			theReader->RecreateReaderSync();
+
+			if (!Params.bPerformedInitialSeek)
+			{
+				// Figure out the offset in seconds
+				const FFrameRate FrameRate = Context.GetFrameRate();
+				const FFrameTime FrameTime(Context.GetTime().FrameNumber - Params.SectionStartFrame + Params.StartFrameOffset);
+				const int64 DenominatorTicks = FrameRate.Denominator * ETimespan::TicksPerSecond;
+				const int64 FrameTicks = FMath::DivideAndRoundNearest(int64(FrameTime.GetFrame().Value * DenominatorTicks), int64(FrameRate.Numerator));
+				const int64 FrameSubTicks = FMath::DivideAndRoundNearest(int64(FrameTime.GetSubFrame() * DenominatorTicks), int64(FrameRate.Numerator));
+
+				FTimespan StartTime(FrameTicks + FrameSubTicks);
+
+				theReader->StreamingSeekTo(StartTime.GetTotalSeconds());
+
+				Params.bPerformedInitialSeek = true;
+			}
 		}
 	}
 }
@@ -341,23 +362,38 @@ void FECVAssetEvalTemplate::TearDown(FPersistentEvaluationData& PersistentData, 
 		return;
 	}
 
-	// restore the old reader
-	Params.RestoreActorProperties();
 
-	// teardown when section playback is finished
-	if (Params.SavedReaderRendererActor)
+	// No valid binding, nothing to teardown
+	if (!Params.ObjectBindingID.IsValid() || !Params.SequenceID.IsValid())
 	{
-		Params.SavedReaderRendererActor.LoadSynchronous();
+		return;
 	}
 
-	UEvercoastStreamingReaderComp* theReader = Params.SavedReaderRendererActor ? Params.SavedReaderRendererActor->Reader : nullptr;
-	if (theReader && !theReader->IsBeingDestroyed())
-	{
-		theReader->RecreateReaderSync();
-		theReader->RemovePlaybackMicroTimeManagement();
-	}
+	UEvercoastStreamingReaderComp* Reader = nullptr;
 
-	SectionData->GiveupActor();
+	// Runtime resolution of EvercoastVolcapActor::Reader
+	for (TWeakObjectPtr<> WeakObject : Player.FindBoundObjects(Params.ObjectBindingID, Params.SequenceID))
+	{
+		UObject* BoundObject = WeakObject.Get();
+		if (!BoundObject)
+			continue;
+
+		if (!BoundObject->IsA(AEvercoastVolcapActor::StaticClass()))
+			continue;
+
+		AEvercoastVolcapActor* VolcapActor = Cast<AEvercoastVolcapActor>(BoundObject);
+		Reader = VolcapActor->Reader;
+
+		if (!Reader)
+			continue;
+
+		UEvercoastStreamingReaderComp* theReader = Reader;
+		if (theReader && !theReader->IsBeingDestroyed() && theReader->IsPlaybackInMicroTimeManagement())
+		{
+			theReader->RecreateReaderSync();
+			theReader->RemovePlaybackMicroTimeManagement();
+		}
+	}
 }
 
 UScriptStruct& FECVAssetEvalTemplate::GetScriptStructImpl() const

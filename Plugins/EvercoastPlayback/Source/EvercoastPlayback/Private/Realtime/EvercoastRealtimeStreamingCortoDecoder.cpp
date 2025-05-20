@@ -102,6 +102,9 @@ public:
 					}
 				}
 
+				m_meshDecoder->UnsetReceivingResult();
+				m_imgDecoder->UnsetReceivingResult();
+
 			}
 			else
 			{
@@ -232,7 +235,7 @@ void EvercoastRealtimeStreamingCortoDecoder::Receive(double timestamp, int64_t f
 	RealtimeMeshImgSeqDecodeThread* decodeThread = static_cast<RealtimeMeshImgSeqDecodeThread*>(m_runnable);
 	if (!decodeThread->AddEntry(timestamp, frameIndex, data, data_size))
 	{
-		//UE_LOG(EvercoastDecoderLog, Warning, TEXT("Add entry to decoder failed. Buffer is full."));
+		//UE_LOG(EvercoastVoxelDecoderLog, Warning, TEXT("Add entry to decoder failed. Buffer is full."));
 	}
 }
 

@@ -48,3 +48,8 @@ void AEvercoastRealtimeVolcapActor::StopPreviewInEditor()
 	Reader->StopPreviewInEditor();
 }
 #endif
+
+void AEvercoastRealtimeVolcapActor::Resync()
+{
+	Reader->Resync();
+}

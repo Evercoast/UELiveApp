@@ -139,6 +139,9 @@ public:
 			BeginInitResource(NormalRender_DepthTarget.Get());
 			BeginInitResource(NormalRender_FilterTarget.Get());
 
+			NormalRender_DepthTarget->SyncRHICreation();
+			NormalRender_FilterTarget->SyncRHICreation();
+
 			if (Material)
 			{
 				Material->SetTextureParameterValue(FName(TEXT("FilteredWorldNormalTex_L")), FilteredNormalRenderTarget[0].Get());
@@ -597,7 +600,10 @@ public:
 
 	virtual void GetDynamicMeshElements(const TArray<const FSceneView*>& Views, const FSceneViewFamily& ViewFamily, uint32 VisibilityMap, FMeshElementCollector& Collector) const override
 	{
+		// Prior to UE 5.4, this method should be only called in rendering thread. However 5.4 changed to calling from a worker thread, at least for UE Editor Win64
+#if !(ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 4)
 		check(IsInRenderingThread());
+#endif
 
 		if (NumVerts <= 0 || NumIndices <= 0) 
 		{
@@ -637,9 +643,10 @@ public:
 
 		FMatrix ObjectToWorld = BaseComponent->GetComponentTransform().ToMatrixWithScale();
 
-		
+#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 4
+		FRHICommandListBase& RHICmdList = Collector.GetRHICommandList();
+#endif
 
-		
 		// For each view..
 		for (int32 ViewIndex = 0; ViewIndex < Views.Num(); ViewIndex++)
 		{
@@ -717,7 +724,9 @@ public:
 
 				FDynamicPrimitiveUniformBuffer& DynamicPrimitiveUniformBuffer = Collector.AllocateOneFrameResource<FDynamicPrimitiveUniformBuffer>();
 #if ENGINE_MAJOR_VERSION == 5
-#if ENGINE_MINOR_VERSION >= 1
+#if ENGINE_MINOR_VERSION >= 4
+				DynamicPrimitiveUniformBuffer.Set(RHICmdList, GetLocalToWorld(), PreviousLocalToWorld, GetBounds(), GetLocalBounds(), GetLocalBounds(), true, bHasPrecomputedVolumetricLightmap, bOutputVelocity, GetCustomPrimitiveData());
+#elif ENGINE_MINOR_VERSION >= 1
 				DynamicPrimitiveUniformBuffer.Set(GetLocalToWorld(), PreviousLocalToWorld, GetBounds(), GetLocalBounds(), GetLocalBounds(), true, bHasPrecomputedVolumetricLightmap, bOutputVelocity, GetCustomPrimitiveData());
 #else
 				DynamicPrimitiveUniformBuffer.Set(GetLocalToWorld(), PreviousLocalToWorld, GetBounds(), GetLocalBounds(), GetLocalBounds(), true, bHasPrecomputedVolumetricLightmap, DrawsVelocity(), bOutputVelocity, GetCustomPrimitiveData());
@@ -825,7 +834,9 @@ public:
 
 			FDynamicPrimitiveUniformBuffer& DynamicPrimitiveUniformBuffer = Context.RayTracingMeshResourceCollector.AllocateOneFrameResource<FDynamicPrimitiveUniformBuffer>();
 #if ENGINE_MAJOR_VERSION == 5
-#if ENGINE_MINOR_VERSION >= 1
+#if ENGINE_MINOR_VERSION >= 4
+			DynamicPrimitiveUniformBuffer.Set(FRHICommandListImmediate::Get(), GetLocalToWorld(), PreviousLocalToWorld, GetBounds(), GetLocalBounds(), GetLocalBounds(), true, bHasPrecomputedVolumetricLightmap, bOutputVelocity, GetCustomPrimitiveData());
+#elif ENGINE_MINOR_VERSION >= 1
 			DynamicPrimitiveUniformBuffer.Set(GetLocalToWorld(), PreviousLocalToWorld, GetBounds(), GetLocalBounds(), GetLocalBounds(), true, bHasPrecomputedVolumetricLightmap, bOutputVelocity, GetCustomPrimitiveData());
 #else
 			DynamicPrimitiveUniformBuffer.Set(GetLocalToWorld(), PreviousLocalToWorld, GetBounds(), GetLocalBounds(), GetLocalBounds(), true, bHasPrecomputedVolumetricLightmap, DrawsVelocity(), bOutputVelocity, GetCustomPrimitiveData());
@@ -843,7 +854,9 @@ public:
 			RayTracingInstance.Materials.Add(MeshBatch);
 
 #if ENGINE_MAJOR_VERSION == 5
-#if ENGINE_MINOR_VERSION >= 2
+#if ENGINE_MINOR_VERSION >= 4
+			// do nothing
+#elif ENGINE_MINOR_VERSION >= 2
 			Context.BuildInstanceMaskAndFlags(RayTracingInstance, *this);
 #else
 			RayTracingInstance.BuildInstanceMaskAndFlags(GetScene().GetFeatureLevel());

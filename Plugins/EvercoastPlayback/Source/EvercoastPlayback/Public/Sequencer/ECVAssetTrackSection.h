@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Templates/SharedPointer.h"
 #include "MovieSceneSection.h"
+#include "MovieScene.h"
 #include "ECVAssetTrackSection.generated.h"
 
 class AEvercoastVolcapActor;
@@ -24,9 +25,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evercoast Media")
 	UEvercoastECVAsset* Asset;
 
+	/*
 	// Use TSoftObjectPtr to allow cross level reference
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evercoast Media")
 	TSoftObjectPtr<AEvercoastVolcapActor> ReaderRendererActor;
+	*/
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evercoast Control")
 	FFrameNumber StartFrameOffset;

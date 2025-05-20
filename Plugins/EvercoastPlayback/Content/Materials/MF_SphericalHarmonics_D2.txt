@@ -1,0 +1,17 @@
+static const float SH_C2[] = { 1.0925484, -1.0925484, 0.3153916, -1.0925484, 0.5462742 };
+
+float xx = dir.x * dir.x;
+float yy = dir.y * dir.y;
+float zz = dir.z * dir.z;
+float xy = dir.x * dir.y;
+float yz = dir.y * dir.z;
+float xz = dir.x * dir.z;
+
+float3 result =
+    (SH_C2[0] * xy) * sh4 +
+    (SH_C2[1] * yz) * sh5 +
+    (SH_C2[2] * (2 * zz - xx - yy)) * sh6 +
+    (SH_C2[3] * xz) * sh7 +
+    (SH_C2[4] * (xx - yy)) * sh8;
+
+return result;

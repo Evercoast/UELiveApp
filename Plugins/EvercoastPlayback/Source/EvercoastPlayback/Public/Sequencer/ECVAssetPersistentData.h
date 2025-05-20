@@ -16,11 +16,11 @@ struct EVERCOASTPLAYBACK_API FECVAssetPersistentData :
 	virtual ~FECVAssetPersistentData();
 
 public:
-	UEvercoastStreamingReaderComp* GetEvercoastReader() const;
-	UEvercoastRendererSelectorComp* GetEvercoastRenderer() const;
+	//UEvercoastStreamingReaderComp* GetEvercoastReader() const;
+	//UEvercoastRendererSelectorComp* GetEvercoastRenderer() const;
 	/** Set up this persistent data object. */
-	void AcquireActor(TSoftObjectPtr<AEvercoastVolcapActor> theActor);
-	void GiveupActor();
+	//void AcquireActor(TSoftObjectPtr<AEvercoastVolcapActor> theActor);
+	//void GiveupActor();
 private:
-	TSoftObjectPtr<AEvercoastVolcapActor> AcquiredActor;
+	//TSoftObjectPtr<AEvercoastVolcapActor> AcquiredActor;
 };

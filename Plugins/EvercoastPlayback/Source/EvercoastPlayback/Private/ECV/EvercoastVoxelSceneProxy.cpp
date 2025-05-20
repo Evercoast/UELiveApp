@@ -8,7 +8,7 @@
 * @Last Modified time: 2021-11-17 05:47:40
 */
 #include "EvercoastVoxelSceneProxy.h"
-#include "EvercoastDecoder.h"
+#include "EvercoastVoxelDecoder.h"
 #include "EvercoastLocalVoxelFrame.h"
 #include "PositionOnlyMesh.h"
 #include "Filter/FilteringTarget.h"
@@ -51,6 +51,9 @@ FEvercoastVoxelSceneProxy::FEvercoastVoxelSceneProxy(UEvercoastVoxelRendererComp
 		BeginInitResource(NormalRender_DepthTarget.Get());
 		BeginInitResource(NormalRender_FilterTarget.Get());
 
+		NormalRender_DepthTarget->SyncRHICreation();
+		NormalRender_FilterTarget->SyncRHICreation();
+
 		if (Material)
 		{
 			Material->SetTextureParameterValue(FName(TEXT("FilteredWorldNormalTex_L")), FilteredNormalRenderTarget[0].Get());
@@ -58,11 +61,6 @@ FEvercoastVoxelSceneProxy::FEvercoastVoxelSceneProxy(UEvercoastVoxelRendererComp
 		}
 
 	}
-
-	VertexFactory_CubeMesh.SetSceneProxy(this);
-
-	if (bUseIcosahedronForNormalRender)
-		VertexFactory_IcosahedronMesh.SetSceneProxy(this);
 
 #if RHI_RAYTRACING
 	if (IsRayTracingEnabled())
@@ -408,6 +406,7 @@ FPrimitiveViewRelevance FEvercoastVoxelSceneProxy::GetViewRelevance(const FScene
 	Result.bShadowRelevance = IsShadowCast(View);
 	Result.bEditorPrimitiveRelevance = UseEditorCompositing(View);
 	Result.bVelocityRelevance = false;
+	Result.bSeparateTranslucency = false; // only opaque materials
 	return Result;
 }
 
@@ -425,7 +424,9 @@ void FEvercoastVoxelSceneProxy::GetDynamicMeshElements(
 	EffectiveLocalToWorld = GetLocalToWorld();
 
 	auto MaterialRenderProxy = Material->GetRenderProxy();
-
+#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 4
+	FRHICommandListBase& RHICmdList = Collector.GetRHICommandList();
+#endif
 	FMatrix ObjectToWorld = BaseComponent->GetComponentTransform().ToMatrixWithScale();
 	// allocate mesh from collector
 	for (int32 ViewIndex = 0; ViewIndex < Views.Num(); ViewIndex++)
@@ -516,7 +517,9 @@ void FEvercoastVoxelSceneProxy::GetDynamicMeshElements(
 			GetScene().GetPrimitiveUniformShaderParameters_RenderThread(GetPrimitiveSceneInfo(), bHasPrecomputedVolumetricLightmap, PreviousLocalToWorld, SingleCaptureIndex, bOutputVelocity);
 
 			FDynamicPrimitiveUniformBuffer& DynamicPrimitiveUniformBuffer = Collector.AllocateOneFrameResource<FDynamicPrimitiveUniformBuffer>();
-#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 1
+#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 4
+			DynamicPrimitiveUniformBuffer.Set(RHICmdList, GetLocalToWorld(), PreviousLocalToWorld, GetBounds(), GetLocalBounds(), true, bHasPrecomputedVolumetricLightmap, bOutputVelocity);
+#elif ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 1
 			DynamicPrimitiveUniformBuffer.Set(GetLocalToWorld(), PreviousLocalToWorld, GetBounds(), GetLocalBounds(), true, bHasPrecomputedVolumetricLightmap, bOutputVelocity);
 #else
 			DynamicPrimitiveUniformBuffer.Set(GetLocalToWorld(), PreviousLocalToWorld, GetBounds(), GetLocalBounds(), true, bHasPrecomputedVolumetricLightmap, DrawsVelocity(), bOutputVelocity);
@@ -588,7 +591,10 @@ void FEvercoastVoxelSceneProxy::GetDynamicRayTracingInstances(FRayTracingMateria
 
 		FDynamicPrimitiveUniformBuffer& DynamicPrimitiveUniformBuffer = Context.RayTracingMeshResourceCollector.AllocateOneFrameResource<FDynamicPrimitiveUniformBuffer>();
 #if ENGINE_MAJOR_VERSION == 5
-#if ENGINE_MINOR_VERSION >= 1
+#if ENGINE_MINOR_VERSION >= 4
+		FRHICommandListBase& RHICmdList = FRHICommandListImmediate::Get();
+		DynamicPrimitiveUniformBuffer.Set(RHICmdList, GetLocalToWorld(), PreviousLocalToWorld, GetBounds(), GetLocalBounds(), GetLocalBounds(), true, bHasPrecomputedVolumetricLightmap, bOutputVelocity, GetCustomPrimitiveData());
+#elif ENGINE_MINOR_VERSION >= 1
 		DynamicPrimitiveUniformBuffer.Set(GetLocalToWorld(), PreviousLocalToWorld, GetBounds(), GetLocalBounds(), GetLocalBounds(), true, bHasPrecomputedVolumetricLightmap, bOutputVelocity, GetCustomPrimitiveData());
 #else
 		DynamicPrimitiveUniformBuffer.Set(GetLocalToWorld(), PreviousLocalToWorld, GetBounds(), GetLocalBounds(), GetLocalBounds(), true, bHasPrecomputedVolumetricLightmap, DrawsVelocity(), bOutputVelocity, GetCustomPrimitiveData());
@@ -606,7 +612,9 @@ void FEvercoastVoxelSceneProxy::GetDynamicRayTracingInstances(FRayTracingMateria
 		RayTracingInstance.Materials.Add(MeshBatch);
 
 #if ENGINE_MAJOR_VERSION == 5
-#if ENGINE_MINOR_VERSION >= 2
+#if ENGINE_MINOR_VERSION >= 4
+		// do nothing
+#elif ENGINE_MINOR_VERSION >= 2
 		Context.BuildInstanceMaskAndFlags(RayTracingInstance, *this);
 #else
 		RayTracingInstance.BuildInstanceMaskAndFlags(GetScene().GetFeatureLevel());
@@ -639,11 +647,6 @@ void FEvercoastVoxelSceneProxy::SetVoxelData_RenderThread(FRHICommandListBase& R
 	VertexFactory_CubeMesh.SetInstancingData(m_voxelFrame);
 	if (bNormalRender && bUseIcosahedronForNormalRender)
 		VertexFactory_IcosahedronMesh.SetInstancingData(m_voxelFrame);
-}
-
-void FEvercoastVoxelSceneProxy::OnTransformChanged()
-{
-
 }
 
 void FEvercoastVoxelSceneProxy::LockVoxelData()

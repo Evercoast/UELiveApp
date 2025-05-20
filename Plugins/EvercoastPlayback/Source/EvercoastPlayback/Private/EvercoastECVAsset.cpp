@@ -180,7 +180,7 @@ static FString NO_EXTERNAL_VIDEO_NEEDED("__NO_MP4__");
 bool UEvercoastECVAsset::_DoValidation(const FString& url)
 {
 	// create a reader and see the callback results
-	auto reader = UGhostTreeFormatReader::Create(true, nullptr, 2048);
+	auto reader = UGhostTreeFormatReader::Create(true, nullptr, 2048, GetTransientPackage());
 	bool ret = reader->ValidateLocation(url, 60.0);
 
 	if (reader->MeshRequiresExternalData())

@@ -401,16 +401,22 @@ int32 UPicoAudioSoundWave::GetResourceSizeForFormat(FName Format)
 	return 0;
 }
 
-void UPicoAudioSoundWave::GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const
-{
-	Super::GetAssetRegistryTags(OutTags);
-}
-
 bool UPicoAudioSoundWave::HasCompressedData(FName Format, ITargetPlatform* TargetPlatform) const
 {
 	return false;
 }
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4
+void UPicoAudioSoundWave::BeginGetCompressedData(FName Format, const FPlatformAudioCookOverrides* CompressionOverrides, const ITargetPlatform* InTargetPlatform)
+{
+	// Copied empty implementation as in SoundWaveProcedural
+}
 
+FByteBulkData* UPicoAudioSoundWave::GetCompressedData(FName Format, const FPlatformAudioCookOverrides* CompressionOverrides, const ITargetPlatform* InTargetPlatform)
+{
+	// Copied empty implementation as in SoundWaveProcedural
+	return nullptr;
+}
+#else
 void UPicoAudioSoundWave::BeginGetCompressedData(FName Format, const FPlatformAudioCookOverrides* CompressionOverrides)
 {
 	// SoundWaveProcedural does not have compressed data and should generally not be asked about it
@@ -421,6 +427,7 @@ FByteBulkData* UPicoAudioSoundWave::GetCompressedData(FName Format, const FPlatf
 	// SoundWaveProcedural does not have compressed data and should generally not be asked about it
 	return nullptr;
 }
+#endif
 
 void UPicoAudioSoundWave::Serialize(FArchive& Ar)
 {

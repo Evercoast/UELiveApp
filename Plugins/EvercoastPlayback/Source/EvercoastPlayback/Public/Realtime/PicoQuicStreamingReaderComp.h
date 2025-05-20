@@ -12,7 +12,7 @@
 #include "PicoQuicStreamingReaderComp.generated.h"
 
 class UEvercoastVoxelRendererComp;
-class IEvercoastStreamingDataDecoder;
+class IEvercoastRealtimeDataDecoder;
 class IGenericDecoder;
 class UAudioComponent;
 class RealtimeNetworkThread;
@@ -111,6 +111,10 @@ public:
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Livestreaming")
 	void StopPreviewInEditor();
 #endif
+
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Livestreaming")
+	void Resync();
+
 	UPROPERTY(VisibleDefaultsOnly, AdvancedDisplay, Category = "Livestreaming")
 	TSoftObjectPtr<UEvercoastRendererSelectorComp> Renderer;
 
@@ -142,7 +146,7 @@ public:
 	TSoftObjectPtr<UEvercoastRendererSelectorComp> GetRenderer() const;
 
 private:
-	std::shared_ptr<IEvercoastStreamingDataDecoder> CreateDecoder(uint32_t stream_type);
+	std::shared_ptr<IEvercoastRealtimeDataDecoder> CreateDecoder(uint32_t stream_type);
 	void DestroyDecoder();
 	void PrepareRenderer();
 
@@ -181,10 +185,10 @@ public:
 	FPicoQuicStreamingReaderaComp_OnConnectionSuccess OnConnectionSuccess;
 private:
 
-	std::shared_ptr<GenericDecodeResult>				PopSynchronisedResultRegardsAudioTimestamp(double timestamp, std::shared_ptr<IEvercoastStreamingDataDecoder> disposer);
+	std::shared_ptr<GenericDecodeResult>				PopSynchronisedResultRegardsAudioTimestamp(double timestamp, std::shared_ptr<IEvercoastRealtimeDataDecoder> disposer);
 
 	std::shared_ptr<RealtimeNetworkThread>				m_networkThread;
-	std::shared_ptr<IEvercoastStreamingDataDecoder>		m_dataDecoder;
+	std::shared_ptr<IEvercoastRealtimeDataDecoder>		m_dataDecoder;
 	UAudioComponent*									m_audioComponent;
 	UPicoAudioSoundWave*								m_sound;
 

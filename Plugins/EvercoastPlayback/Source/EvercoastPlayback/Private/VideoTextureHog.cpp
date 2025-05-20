@@ -88,10 +88,6 @@ bool UVideoTextureHog::ResetTo(double timestmap, const std::function<void()>& ca
 {
 	return false;
 }
-bool UVideoTextureHog::JumpBy(double timestampOffset, const std::function<void()>& callback)
-{
-	return false;
-}
 bool UVideoTextureHog::StartHogging()
 {
 	return false;
@@ -166,6 +162,16 @@ bool UVideoTextureHog::IsFrameBeyondCachedRange(int64_t frameIndex) const
 
 // --f--|<--------->|-----
 bool UVideoTextureHog::IsFrameBeforeCachedRange(int64_t frameIndex) const
+{
+	return false;
+}
+
+void UVideoTextureHog::TrimCache(double medianTimestamp, double halfFrameInterval)
+{
+
+}
+
+bool UVideoTextureHog::IsTextureBeyondRange(double timestamp, double halfFrameInterval) const
 {
 	return false;
 }

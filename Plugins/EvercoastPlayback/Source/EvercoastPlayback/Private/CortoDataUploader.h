@@ -21,4 +21,5 @@ private:
 	std::shared_ptr<CortoLocalTextureFrame> m_localTextureFrame;
 	UCortoMeshRendererComp* m_rendererComponent;
 	bool m_dataDirty;
+	int m_lastUploadedFrameIndex;
 };

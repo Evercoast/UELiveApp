@@ -3,7 +3,7 @@
 #include "EvercoastRendererSelectorComp.h"
 #include "EvercoastVolcapActor.h"
 
-FECVAssetPersistentData::FECVAssetPersistentData() : AcquiredActor(nullptr)
+FECVAssetPersistentData::FECVAssetPersistentData() //: AcquiredActor(nullptr)
 {
 
 }
@@ -12,6 +12,7 @@ FECVAssetPersistentData::~FECVAssetPersistentData()
 {
 }
 
+/*
 UEvercoastStreamingReaderComp* FECVAssetPersistentData::GetEvercoastReader() const
 {
 	if (AcquiredActor && !AcquiredActor->IsActorBeingDestroyed())
@@ -41,3 +42,4 @@ void FECVAssetPersistentData::GiveupActor()
 	// Must NOT call RemoveFromRoot()
 	AcquiredActor = nullptr;
 }
+*/

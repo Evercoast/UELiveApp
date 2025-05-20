@@ -21,9 +21,6 @@ struct EVERCOASTPLAYBACK_API FECVAssetTrackSectionParams
 	GENERATED_BODY()
 
 	UPROPERTY()
-	TSoftObjectPtr<AEvercoastVolcapActor> ReaderRendererActor;
-
-	UPROPERTY()
 	UEvercoastECVAsset* Asset;
 
 	UPROPERTY()
@@ -38,21 +35,21 @@ struct EVERCOASTPLAYBACK_API FECVAssetTrackSectionParams
 	UPROPERTY(Transient)
 	UEvercoastECVAsset* SavedAsset;
 
-	UPROPERTY(Transient)
-	TSoftObjectPtr<AEvercoastVolcapActor> SavedReaderRendererActor;
+	FGuid ObjectBindingID;
+
+	FMovieSceneSequenceID SequenceID;
 
 	FTimespan FullDuration;
 
-	FECVAssetTrackSectionParams()
-		: ReaderRendererActor(nullptr)
-		, Asset(nullptr)
-		, SavedAsset(nullptr)
-		, SavedReaderRendererActor(nullptr)
-		, FullDuration(0)
-	{}
+	bool bPerformedInitialSeek;
 
-	void SaveActorProperties();
-	void RestoreActorProperties() const;
+	FECVAssetTrackSectionParams()
+		:
+		Asset(nullptr)
+		, SavedAsset(nullptr)
+		, FullDuration(0)
+		, bPerformedInitialSeek(false)
+	{}
 };
 
 

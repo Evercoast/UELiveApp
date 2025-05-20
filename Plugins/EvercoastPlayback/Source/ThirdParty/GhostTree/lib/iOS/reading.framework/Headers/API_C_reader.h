@@ -64,10 +64,10 @@ extern "C"
     EC_READING_API_EXPORT bool reader_poll(Handle reader);
 
     EC_READING_API_EXPORT void reader_enable_channel_representations(Handle reader,
-                                                                     uint32_t channel_id,
-                                                                     uint32_t representation_count,
-                                                                     const uint32_t* representation_ids,
-                                                                     bool clear_cache);
+        uint32_t channel_id,
+        uint32_t representation_count,
+        const uint32_t* representation_ids,
+        bool clear_cache);
 
     EC_READING_API_EXPORT void reader_finished_with_block(Handle reader, uint32_t block_id);
 

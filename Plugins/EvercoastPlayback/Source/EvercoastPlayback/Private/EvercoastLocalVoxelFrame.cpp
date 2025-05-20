@@ -8,7 +8,7 @@
 * @Last Modified time: 2021-11-17 05:47:10
 */
 #include "EvercoastLocalVoxelFrame.h"
-#include "EvercoastDecoder.h"
+#include "EvercoastVoxelDecoder.h"
 
 EvercoastLocalVoxelFrame::EvercoastLocalVoxelFrame(const GTHandle voxelFrame, bool makeCopy) :
 	m_voxelCount(0),
@@ -18,7 +18,8 @@ EvercoastLocalVoxelFrame::EvercoastLocalVoxelFrame(const GTHandle voxelFrame, bo
 	m_positionData(nullptr),
 	m_colourData(nullptr),
 	m_voxelDataSize(0),
-	m_madeCopy(makeCopy)
+	m_madeCopy(makeCopy),
+	m_voxelFrameHandle(voxelFrame)
 {
 	VoxelFrameDefinition frameDef;
 	if (voxel_frame_get_definition(voxelFrame, &frameDef))
@@ -45,7 +46,7 @@ EvercoastLocalVoxelFrame::EvercoastLocalVoxelFrame(const GTHandle voxelFrame, bo
 	}
 	else
 	{
-		UE_LOG(EvercoastDecoderLog, Warning, TEXT("Decode failed. Cannot extract frame def while uploading. Empty frame will be used."));
+		UE_LOG(EvercoastVoxelDecoderLog, Warning, TEXT("Decode failed. Cannot extract frame def while uploading. Empty frame will be used."));
 	}
 }
 
@@ -69,3 +70,20 @@ FBoxSphereBounds EvercoastLocalVoxelFrame::CalcBounds() const
 	boundsMax *= EVERCOAST_TO_UNREAL;
 	return FBoxSphereBounds(FBox(boundsMin, boundsMax));
 }
+
+bool EvercoastLocalVoxelFrame::ContainsVoxelFrame(const GTHandle otherVoxelFrame) const
+{
+	return m_voxelFrameHandle == otherVoxelFrame;
+}
+
+bool EvercoastLocalVoxelFrame::operator==(EvercoastLocalVoxelFrame& rhs) const
+{
+	return m_voxelFrameHandle == rhs.m_voxelFrameHandle;
+}
+
+bool EvercoastLocalVoxelFrame::operator!=(EvercoastLocalVoxelFrame& rhs) const
+{
+	return !(operator==(rhs));
+
+}
+

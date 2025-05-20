@@ -13,6 +13,7 @@
 #include <mutex>
 #include <queue>
 #include <map>
+#include <functional> 
 #include "ec_reading_compatibility.h"
 #include "CoreMinimal.h"
 #include "UObject/Class.h"
@@ -52,11 +53,10 @@ class UGhostTreeFormatReader : public UObject
 {
 	GENERATED_BODY()
 public:
-
 	static constexpr uint32_t DECODE_META_NONE = 0;
 	static constexpr uint32_t DECODE_META_IMAGE_WEBP = 1;
 
-	static UGhostTreeFormatReader* Create(bool inEditor, UAudioComponent* audioComponent, int32 maxCacheSizeInMB);
+	static UGhostTreeFormatReader* Create(bool inEditor, UAudioComponent* audioComponent, int32 maxCacheSizeInMB, UObject* Outer);
 	virtual ~UGhostTreeFormatReader();
 
 	void SetInitialSeek(float initialSeekTimestamp);
@@ -68,13 +68,14 @@ public:
 	}
 	
 	bool RequestFrameOnTimestamp(float timestamp);
-	void RequestFrameNext();
+	bool RequestFrameOnTimestamp(float timestamp, const std::function<void()>& callback);
+	void ContinueRequest();
 	void GetChannelSpatialInfo(FVector& outOrigin, FQuat& outOrientation) const;
 	void Tick();
 	bool IsWaitingForData() const;
 	bool IsWaitingForAudioData() const;
 	float GetFrameInterval() const;
-	float GetFrameRate() const;
+	uint32_t GetFrameRate() const;
 	FString GetExternalPostfix() const;
 	bool IsMeshData() const;
 	bool IsMeshDataWithNormal() const;
@@ -194,7 +195,7 @@ private:
 	void Init(const GTHandle reader_instance, bool inEditor, UAudioComponent* audioComponent, int32 maxCacheSizeInMB);
 
 	void ProcessRequestResults();
-	void FinishCurrentBlock();
+	void FinishPendingBlocks();
 	static TSharedRef<IHttpRequest, ESPMode::ThreadSafe> NewHttpRequest(const FString& url, uint64_t rangeStart, uint64_t rangeEnd, float timeout);
 	void CreateCache();
 
@@ -206,6 +207,7 @@ private:
 	void OnNextBlockNotReady(uint32_t channel_id);
 	void OnBlockReceived(ChannelDataBlock data_block);
 	void OnBlockInvalidated(uint32_t block_id);
+	void OnLastBlock(uint32_t channel_id);
 	void OnCacheUpdate(double cached_until);
 	void OnFinishedWithCacheId(uint32_t cache_id);
 	bool OnOpenConnection(uint32_t conn_handle, const char* name);
@@ -268,7 +270,6 @@ private:
 	bool m_mainChannelDataReady;
 	float m_currTimestamp;
 	float m_currSeekingTarget;
-	float m_outstandingSeekingTarget;
 	float m_initSeekingTarget;
 	bool m_inSeeking;
 	float m_mainChannelDuration;
@@ -278,7 +279,6 @@ private:
 	{
 		ChannelDataBlock MainBlock;
 		ChannelDataBlock TextureBlock;
-		std::vector<ChannelDataBlock> UnusedBlocks;
 
 		DataBlocks() :
 			MainBlock{
@@ -306,10 +306,39 @@ private:
 		{
 		}
 
-		void Invalidate(uint32_t blockId);
-		void ReleaseAllBlocks(GTHandle reader);
+		void ClearMainBlock()
+		{
+			MainBlock = ChannelDataBlock{
+				0,
+				(uint32_t)-1,
+				0,
+				0,
+				0,
+				0.0,
+				0.0,
+				(uint32_t)-1,
+				0
+			};
+		}
+		void ClearTextureBlock()
+		{
+			TextureBlock = ChannelDataBlock{
+				0,
+				(uint32_t)-1,
+				0,
+				0,
+				0,
+				0.0,
+				0.0,
+				(uint32_t)-1,
+				0
+			};
+		}
 	};
-	DataBlocks m_currentBlock;
+	DataBlocks m_lastBlockStub; // for making further requests after cache is freed up
+	std::recursive_mutex m_pendingReleaseBlocksLock;
+	std::vector<ChannelDataBlock> m_pendingDataBlocksToRelease;
+
 
 
 	Position m_channelOrigin;
@@ -327,6 +356,8 @@ private:
 	bool m_forceMemoryCache;
 	int32 m_maxCacheSizeInMB;
 	bool m_preferExternalVideoData;
+
+	std::map<float, std::function<void()>> m_seekCallbacks;
 
 	friend class TheReaderDelegate;
 	friend class TheValidationDelegate;

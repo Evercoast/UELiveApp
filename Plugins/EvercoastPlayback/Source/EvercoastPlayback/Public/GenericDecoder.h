@@ -12,6 +12,7 @@ enum DecoderType : uint8_t
 	DT_EvercoastVoxel = 0,
 	DT_CortoMesh,
 	DT_WebpImage,
+	DT_EvercoastSpz,
 	DT_Invalid
 };
 
@@ -21,6 +22,7 @@ enum DecodeResultType
 	DRT_CortoMesh,
 	DRT_WebpImage,
 	DRT_CortoMesh_WebpImage_Unified,
+	DRT_GaussianSplat,
 	DRT_Invalid
 };
 
@@ -65,5 +67,5 @@ class IGenericDecoder
 public:
 	virtual DecoderType GetType() const = 0;
 	virtual bool DecodeMemoryStream(const uint8_t* stream, size_t stream_size, double timestamp, int64_t frameIndex, GenericDecodeOption* option) = 0;
-	virtual std::shared_ptr<GenericDecodeResult> GetResult() = 0;
+	virtual std::shared_ptr<GenericDecodeResult> TakeResult() = 0;
 };

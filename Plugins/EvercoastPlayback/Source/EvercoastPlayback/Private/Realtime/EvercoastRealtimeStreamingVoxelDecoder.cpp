@@ -1,6 +1,6 @@
 #include "Realtime/EvercoastRealtimeStreamingVoxelDecoder.h"
 #include <mutex>
-#include "EvercoastDecoder.h"
+#include "EvercoastVoxelDecoder.h"
 #include "Realtime/PicoQuicStreamingReaderComp.h"
 #include "EvercoastPerfCounter.h"
 #include "HAL/Runnable.h"
@@ -22,7 +22,7 @@ public:
 	RealtimeVoxelDecodeThread(std::shared_ptr<IGenericDecoder> decoder, std::shared_ptr<EvercoastPerfCounter> perfCounter) :
 		m_baseDecoder(decoder), m_perfCounter(perfCounter)
 	{
-		auto voxelDecoder = std::static_pointer_cast<EvercoastDecoder>(m_baseDecoder);
+		auto voxelDecoder = std::static_pointer_cast<EvercoastVoxelDecoder>(m_baseDecoder);
 		m_baseDefinition = voxelDecoder->GetDefaultDefinition();
 		m_baseDefinition.fast_decode = true;
 		m_baseDefinition.rgb_colourspace_conversion = false;
@@ -57,11 +57,11 @@ public:
 
 			if (dataFrame.IsSet() && dataFrame->data.Num() > 0)
 			{
-				EvercoastDecodeOption option(m_baseDefinition);
+				EvercoastVoxelDecodeOption option(m_baseDefinition);
 				if (m_baseDecoder->DecodeMemoryStream(dataFrame->data.GetData(), dataFrame->data.Num(), dataFrame->timestamp, dataFrame->frameIndex, &option))
 				{
-					auto result = m_baseDecoder->GetResult();
-					auto pResult = std::static_pointer_cast<EvercoastDecodeResult>(result);
+					auto result = m_baseDecoder->TakeResult();
+					auto pResult = std::static_pointer_cast<EvercoastVoxelDecodeResult>(result);
 					check(pResult->resultFrame);
 
 					{
@@ -118,24 +118,22 @@ public:
 		return true;
 	}
 
-	std::shared_ptr<EvercoastDecodeResult> PopResult()
+	std::shared_ptr<EvercoastVoxelDecodeResult> PopResult()
 	{
 		std::lock_guard<std::mutex> guardOutput(m_outputMutex);
 		if (m_output)
 		{
-			const auto output = m_output;
-			m_output.reset();
-			return output;
+			return std::move(m_output);
 		}
 		else
 		{
-			return std::make_shared<EvercoastDecodeResult>(false, -1.0, -1, InvalidHandle);
+			return std::make_shared<EvercoastVoxelDecodeResult>(false, -1.0, -1, InvalidHandle);
 		}
 	}
 
-	std::shared_ptr<EvercoastDecodeResult> PeekResult(int offsetFromTop) const
+	std::shared_ptr<EvercoastVoxelDecodeResult> PeekResult(int offsetFromTop) const
 	{
-		return std::make_shared<EvercoastDecodeResult>(false, -1.0, -1, InvalidHandle);
+		return std::make_shared<EvercoastVoxelDecodeResult>(false, -1.0, -1, InvalidHandle);
 	}
 
 
@@ -145,7 +143,7 @@ private:
 	Definition m_baseDefinition;
 
 	TOptional<InputFrame> m_input;
-	std::shared_ptr<EvercoastDecodeResult> m_output; // array of shared_ptrs
+	std::shared_ptr<EvercoastVoxelDecodeResult> m_output;
 
 	std::atomic<bool> m_running{ false };
 
@@ -159,7 +157,7 @@ private:
 };
 
 EvercoastRealtimeStreamingVoxelDecoder::EvercoastRealtimeStreamingVoxelDecoder(std::shared_ptr<EvercoastPerfCounter> perfCounter) :
-	m_baseVoxelDecoder(EvercoastDecoder::Create()), m_runnable(nullptr), m_runnableController(nullptr)
+	m_baseVoxelDecoder(EvercoastVoxelDecoder::Create()), m_runnable(nullptr), m_runnableController(nullptr)
 {
 	m_runnable = new RealtimeVoxelDecodeThread(m_baseVoxelDecoder, perfCounter);
 	m_runnableController = FRunnableThread::Create(m_runnable, TEXT("Evercoast Realtime Voxel Decode Thread"));
@@ -177,7 +175,7 @@ void EvercoastRealtimeStreamingVoxelDecoder::Receive(double timestamp, int64_t f
 	RealtimeVoxelDecodeThread* decodeThread = static_cast<RealtimeVoxelDecodeThread*>(m_runnable);
 	if (!decodeThread->AddEntry(timestamp, frameIndex, data, data_size))
 	{
-		//UE_LOG(EvercoastDecoderLog, Warning, TEXT("Add entry to decoder failed. Buffer is full."));
+		//UE_LOG(EvercoastVoxelDecoderLog, Warning, TEXT("Add entry to decoder failed. Buffer is full."));
 	}
 }
 
@@ -195,11 +193,7 @@ std::shared_ptr<GenericDecodeResult> EvercoastRealtimeStreamingVoxelDecoder::Pee
 
 void EvercoastRealtimeStreamingVoxelDecoder::DisposeResult(std::shared_ptr<GenericDecodeResult> result)
 {
-	auto pResult = std::static_pointer_cast<EvercoastDecodeResult>(result);
-	if (pResult->resultFrame != InvalidHandle)
-		release_voxel_frame_instance(pResult->resultFrame);
-
-	//result.reset();
+	result->InvalidateResult();
 }
 
 void EvercoastRealtimeStreamingVoxelDecoder::FlushAndDisposeResults()

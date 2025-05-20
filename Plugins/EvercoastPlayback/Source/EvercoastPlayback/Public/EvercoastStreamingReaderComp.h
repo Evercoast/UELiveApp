@@ -16,6 +16,7 @@
 #include "UObject/SoftObjectPtr.h"
 #include "TimestampDriver.h"
 #include "Engine/Texture.h"
+#include "EvercoastVolcapActor.h"
 #include "EvercoastStreamingReaderComp.generated.h"
 
 class UAudioComponent;
@@ -34,14 +35,6 @@ struct FECVAssetEvalTemplate;
 struct FECVAssetTrackSectionParams;
 class AEvercoastVolcapActor;
 
-UENUM(BlueprintType)
-enum class EVideoCodecProvider: uint8
-{
-	AUTO = 0,
-	BUILTIN,
-	FFMPEG
-};
-
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
 class EVERCOASTPLAYBACK_API UEvercoastStreamingReaderComp : public UActorComponent, public EvercoastStreamingReaderStatusCallback
 {
@@ -57,9 +50,6 @@ public:
 	UEvercoastECVAsset* ECVAsset;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data Source")
-	bool bAsyncDataDecoding;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data Source")
 	int32 MaxCacheSizeInMB = 1024; // 1G cache
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data Source")
@@ -67,9 +57,6 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data Source")
 	UTexture* DebugPlaceholderTexture;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data Source", meta = (EditCondition = "bPreferVideoCodec" ))
-	EVideoCodecProvider VideoCodecProvider = EVideoCodecProvider::AUTO;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Playback")
 	bool bAutoPlay;
@@ -132,6 +119,9 @@ public:
 	float StreamingGetDuration() const;
 
 	UFUNCTION(BlueprintCallable, Category = "Evercoast Playback")
+	int32 StreamingGetCurrentFrameRate() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Evercoast Playback")
 	bool IsStreamingPlaying() const;
 
 	UFUNCTION(BlueprintCallable, Category = "Evercoast Playback")
@@ -163,6 +153,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Evercoast Playback")
 	void SetPlaybackMicroTimeManagement(float overrideCurrTime, float overrideDeltaTime, float blockTimestamp); // for Sequencer micro time management
+
+	UFUNCTION(BlueprintCallable, Category = "Evercoast Playback")
+	bool IsPlaybackInMicroTimeManagement() const;
 
 	UFUNCTION(BlueprintCallable, Category = "Evercoast Playback")
 	void RemovePlaybackMicroTimeManagement(); // for Sequencer micro time management
@@ -207,6 +200,9 @@ public:
 	bool IsStreamingDurationReliable() const;
 	void WaitForDurationBecomesReliable();
 
+	void TickSequencerPlayback(float clipDuration);
+	void TickNormalPlayback(float clipDuration);
+
 protected:
 	// Called when the game starts
 	virtual void BeginPlay() override;
@@ -242,21 +238,15 @@ private:
 	void SetPlaybackTiming(bool play);
 	float GetPlaybackTiming() const;
 
-	// ~Begin of functions for Sequencer and editors
-	void RecalcequencerOverrideLoopCount();
-	// ~End of functions for Sequencer and editors
-
 	// ~Functions only for corto mesh decoder
-	UTexture* FindVideoTexture(int64_t frameIndex);
-	bool InvalidateVideoTexture(UTexture* texture);
-	bool InvalidateVideoTextureBeforeFrameIndex(int64_t frameIndex);
-	bool IsVideoFrameWithinHogCache(int64_t frameIndex);
-	bool IsVideoFrameBeyondHogCache(int64_t frameIndex);
-	bool IsVideoFrameBeforeHogCache(int64_t frameIndex);
+	UTexture* FindVideoTexture(int64_t frameIndex) const;
+	void TrimVideoCache(double medianTimestamp);
 	bool IsVideoTextureHogFull() const;
+	bool IsTimestampBeyondVideoCache(double timestamp) const;
 	// ~Functions only for corto mesh decoder
 
 	void _PrintDebugStatus() const; 
+	bool IsFrameCached(double testTimestamp) const;
 
 
 private:
@@ -271,9 +261,8 @@ private:
 	enum SyncStatus
 	{
 		InSync = 0,
-		InSync_SkippedFrames,
-		VideoFeedStarving,
-		GeomFeedStarving
+		WaitForGT,
+		WaitForVideo
 	};
 
 	void CreateReader();
@@ -284,10 +273,9 @@ private:
 	UGhostTreeFormatReader* m_reader;
 
 	std::shared_ptr<IEvercoastStreamingDataDecoder> m_dataDecoder;
-	std::shared_ptr<IGenericDecoder> m_baseDecoder;
-	std::shared_ptr<IGenericDecoder> m_auxDecoder;
-
-	float m_currReadTimestamp;
+	DecoderType m_baseDecoderType;
+//	std::shared_ptr<IGenericDecoder> m_baseDecoder;
+//	std::shared_ptr<IGenericDecoder> m_auxDecoder;
 
 	PlaybackStatus m_playbackStatus;
 
@@ -298,7 +286,6 @@ private:
 	bool m_isReaderInSeeking;
 	bool m_isReaderPlaybackReady;
 	bool m_isReaderWaitingForAudioData;
-	bool m_isReaderWaitingForVideoData;
 
 	/* ~Start of auxillary objects for VIDEO container streamed video/audio*/
 	UPROPERTY(Transient)
@@ -322,8 +309,9 @@ private:
 
 
 	TSharedPtr<FTimestampDriver, ESPMode::ThreadSafe> m_timestampDriver;
-	float m_geomFeedStarvingStartTime;
+//	float m_dataStarvingStartTime;
 
+	/*
 	enum CortoTextureSeekStage
 	{
 		CTS_NA,			// voxel, or doesn't need external video data
@@ -332,9 +320,26 @@ private:
 		CTS_COMPLETED	// completed video seek
 	};
 	CortoTextureSeekStage m_cortoTexSeekStage;
+	*/
+	enum GhostTreeSeekStage
+	{
+		GTS_DEFAULT,
+		GTS_REQUESTED,
+		GTS_COMPLETED
+	};
+	GhostTreeSeekStage m_gtSeekStage;
+
+	enum VideoSeekStage
+	{
+		VDS_DEFAULT,
+		VDS_REQUESTED,
+		VDS_COMPLETED
+	};
+	VideoSeekStage m_vdSeekStage;
 
 	bool m_readerHasFatalError;
 	FString m_readerFataErrorMessage;
 	int32_t m_currentMatchingFrameNumber;
 	float m_currentMatchingTimestamp;
+	float m_lastDueTimestamp;
 };

@@ -1,5 +1,5 @@
 #include "CortoDecoder.h"
-#include "EvercoastDecoder.h"
+#include "EvercoastVoxelDecoder.h"
 #include "corto_decoder_c.h"
 
 CortoDecodeResult::CortoDecodeResult(uint32_t initVertexCount, uint32_t initTriangleCount) :
@@ -182,7 +182,7 @@ bool CortoDecoder::DecodeMemoryStream(const uint8_t* stream, size_t stream_size,
 	bool hasNormal = info.hasNormal > 0 ? true : false;
 	EnsureBuffers((int)vertexCount, (int)triangleCount);
 
-	//UE_LOG(EvercoastDecoderLog, Log, TEXT("Frame: %d, tri: %d vert: %d"), frameIndex, triangleCount, vertexCount);
+	//UE_LOG(EvercoastVoxelDecoderLog, Log, TEXT("Frame: %d, tri: %d vert: %d"), frameIndex, triangleCount, vertexCount);
 	
 	Corto_DecodeMesh(decoder, (Corto_Vector3*)position_buf.data(), (uint32_t*)index_buf.data(), (Corto_Vector3*)normal_buf.data(), nullptr, (Corto_Vector2*)uv_buf.data());
 
@@ -202,7 +202,7 @@ bool CortoDecoder::DecodeMemoryStream(const uint8_t* stream, size_t stream_size,
 	return true;
 }
 
-std::shared_ptr<GenericDecodeResult> CortoDecoder::GetResult()
+std::shared_ptr<GenericDecodeResult> CortoDecoder::TakeResult()
 {
-	return result;
+	return std::move(result);
 }

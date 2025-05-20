@@ -6,11 +6,11 @@
 	<dict>
 		<key>Headers/API_C_reader.h</key>
 		<data>
-		XW2yhMbu385b32+zDVVhro1Bo4o=
+		PSe66kek/DspPCXbG6Esif9GZD0=
 		</data>
 		<key>Headers/API_events.h</key>
 		<data>
-		Ru8330ANud/gwfRwvG+PEiIM1SI=
+		iOZTtmTbbXwW6KfEFNGDK3251ts=
 		</data>
 		<key>Headers/API_macros.hpp</key>
 		<data>
@@ -18,15 +18,19 @@
 		</data>
 		<key>Headers/API_reader.hpp</key>
 		<data>
-		pD11O7DIcWxc0mk9RpsMl1781Zs=
+		ptX4+b+0rMRmtNFp3FpZsJaJqVU=
 		</data>
 		<key>Headers/API_types.h</key>
 		<data>
-		tz46l3MAAkgBnSVgQAo5yF6HWXg=
+		1uY/77bcUrhqJAZ3nMjbOM/GPN0=
 		</data>
 		<key>Info.plist</key>
 		<data>
-		ZDaN/wwMb6/hFaPZE+EwZVlm3uI=
+		bRpC9ceIJSXKzehqWfiVTq5KBv8=
+		</data>
+		<key>PrivacyInfo.xcprivacy</key>
+		<data>
+		A3mKB+Vy38CxpJ7FvmFUb6RzAWs=
 		</data>
 	</dict>
 	<key>files2</key>
@@ -35,14 +39,14 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			SVx2Uo4QSBfQK6VluKrnpqm8nxVR6pg5U7eUEZqlLmc=
+			+GTqqvUEdlBVJvt++Ls4r8GwlycGEfpGQek/Kme/z+k=
 			</data>
 		</dict>
 		<key>Headers/API_events.h</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			Eoc0DyTMXsUH6oo98RR6xyb559eLzrqc6NKXBOlbuFU=
+			skm6lGNb7ZpnPwK/lIJXos6eSMYzCAPXhE1es3OCgxQ=
 			</data>
 		</dict>
 		<key>Headers/API_macros.hpp</key>
@@ -56,14 +60,21 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			ri7Vo/kJ0lCuUjlIgGoAc2rWYwy19fBjYsrFRpkOX+w=
+			q16p4JDmmnujvKxv/hXM4rXQidCKGILDNEPLSvG60ws=
 			</data>
 		</dict>
 		<key>Headers/API_types.h</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			VSrPrcWMTHwshrDr+jHK03El165QDxsg8Li2Qvp4lwo=
+			0vHcDXjuWzvK//Sxxq+2zWx4ZG1HpKd9wKZdLBIAxLM=
+			</data>
+		</dict>
+		<key>PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			oqjr9696PYiyrbluLNzceew/fYNtNlFhReO2hdkHXxA=
 			</data>
 		</dict>
 	</dict>

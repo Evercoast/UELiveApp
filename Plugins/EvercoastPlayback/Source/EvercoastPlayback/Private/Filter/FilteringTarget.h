@@ -3,6 +3,7 @@
 #include "RenderResource.h"
 #include "RHIResources.h"
 #include "UnrealEngineCompatibility.h"
+#include <future>
 
 class FGenericDepthTarget : public FRenderResource
 {
@@ -11,6 +12,9 @@ public:
 	{
 		this->Width = width;
 		this->Height = height;
+
+		RHICreationPromise = std::promise<void>();
+		RHICreationFuture = RHICreationPromise.get_future();
 	}
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 3
@@ -42,6 +46,8 @@ public:
 			CreateInfo);
 #endif
 
+		RHICreationPromise.set_value();
+
 	}
 
 	virtual void ReleaseRHI() override
@@ -49,11 +55,19 @@ public:
 		DepthTextureRHI.SafeRelease();
 	}
 
+	void SyncRHICreation()
+	{
+		RHICreationFuture.get();
+	}
+
 	FTexture2DRHIRef DepthTextureRHI;
 
 private:
 	int32 Width = 1024;
 	int32 Height = 1024;
+
+	std::promise<void> RHICreationPromise;
+	std::future<void> RHICreationFuture;
 };
 
 class FFlipFilterRenderTarget : public FRenderResource
@@ -64,6 +78,9 @@ public:
 		Width = width;
 		Height = height;
 		PixelFormat = format;
+
+		RHICreationPromise = std::promise<void>();
+		RHICreationFuture = RHICreationPromise.get_future();
 	}
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 3
@@ -103,6 +120,7 @@ public:
 				CreateInfo);
 		}
 #endif
+		RHICreationPromise.set_value();
 	}
 
 	virtual void ReleaseRHI() override
@@ -151,6 +169,11 @@ public:
 		}
 	}
 
+	void SyncRHICreation()
+	{
+		RHICreationFuture.get();
+	}
+
 private:
 	static void DoFilter_Horizontal(const FTexture2DRHIRef& SourceTextureRHI, const FTexture2DRHIRef& DestinationTextureRHI, FRHICommandListImmediate& RHICmdList, IRendererModule* RendererModule);
 	static void DoFilter_Vertical(const FTexture2DRHIRef& SourceTextureRHI, const FTexture2DRHIRef& DestinationTextureRHI, FRHICommandListImmediate& RHICmdList, IRendererModule* RendererModule);
@@ -161,5 +184,7 @@ private:
 	EPixelFormat PixelFormat = EPixelFormat::PF_FloatRGBA;
 
 	FTexture2DRHIRef FlipTargets[2] = { nullptr, nullptr };
+	std::promise<void> RHICreationPromise;
+	std::future<void> RHICreationFuture;
 };
 

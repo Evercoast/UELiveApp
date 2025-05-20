@@ -81,8 +81,7 @@ struct FEvercoastSequencerOverrideTimer
 	FEvercoastSequencerOverrideTimer(float duration) :
 		m_duration(duration),
 		m_overrideCurrTime(-1),
-		m_blockOnTime(std::numeric_limits<float>::max()),
-		m_loopedTime(0)
+		m_blockOnTime(std::numeric_limits<float>::max())
 	{
 
 	}
@@ -96,16 +95,12 @@ struct FEvercoastSequencerOverrideTimer
 
 	float GetElapsedTime() const;
 
-	void RecordLoop();
-
 	void ResetTimer();
 
-	void RecalcLoopCount();
 
 	float m_duration;
 	float m_overrideCurrTime;
 	float m_blockOnTime;
-	float m_loopedTime;
 };
 
 struct FAudioTimer : public TSharedFromThis<FAudioTimer>
@@ -145,12 +140,10 @@ public:
 	void EnterSequencerTimestampOverride(float overrideTimestamp, float blockOnTime);
 	void ExitSequencerTimestampOverride();
 	bool IsSequencerOverriding() const;
-	void RecalcSequencerTimestampOverrideLoopCount();
 	void ForceChangeVideoDuration(float newDuration); // this is added for compensate the possible inconsistency between geometry/video duration while keeping the system async
 
 	void Start();
 	void Pause();
-	void MarkLoop(); // <- will mark passed the loop for some timers
 	void ResetTimer();
 	void ResetTimerTo(float timestamp, bool startAfterReset);
 	float GetElapsedTime() const;

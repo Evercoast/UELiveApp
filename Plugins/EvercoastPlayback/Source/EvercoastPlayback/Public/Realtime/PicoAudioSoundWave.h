@@ -39,14 +39,18 @@ public:
 
 	//~ Begin UObject Interface. 
 	virtual void Serialize(FArchive& Ar) override;
-	virtual void GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const override;
 	//~ End UObject Interface. 
 
 	//~ Begin USoundWave Interface.
 	virtual int32 GeneratePCMData(uint8* PCMData, const int32 SamplesNeeded) override;
 	virtual bool HasCompressedData(FName Format, ITargetPlatform* TargetPlatform) const override;
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4
+	virtual void BeginGetCompressedData(FName Format, const FPlatformAudioCookOverrides* CompressionOverrides, const ITargetPlatform* InTargetPlatform) override;
+	virtual FByteBulkData* GetCompressedData(FName Format, const FPlatformAudioCookOverrides* CompressionOverrides, const ITargetPlatform* InTargetPlatform) override;
+#else
 	virtual void BeginGetCompressedData(FName Format, const FPlatformAudioCookOverrides* CompressionOverrides) override;
 	virtual FByteBulkData* GetCompressedData(FName Format, const FPlatformAudioCookOverrides* CompressionOverrides = nullptr) override;
+#endif
 	virtual void InitAudioResource(FByteBulkData& CompressedData) override;
 	virtual bool InitAudioResource(FName Format) override;
 	virtual int32 GetResourceSizeForFormat(FName Format) override;
@@ -134,5 +138,5 @@ private:
 	double m_audioBufferPumpDelay{ 0 };
 	double m_currVideoSyncingExtrapolatedTimestamp{ 0 };
 
-	float m_warmupTime{ 1.0f };
+	float m_warmupTime{ 0.0f };
 };

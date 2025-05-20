@@ -13,7 +13,7 @@ namespace
 UECVAssetTrackSection::UECVAssetTrackSection(const FObjectInitializer& InInitializer) :
 	Super(InInitializer),
 	Asset(nullptr),
-	ReaderRendererActor(nullptr),
+	//ReaderRendererActor(nullptr),
 	StartFrameOffset(0)
 {
 	// When section no longer evaluated, restore the states

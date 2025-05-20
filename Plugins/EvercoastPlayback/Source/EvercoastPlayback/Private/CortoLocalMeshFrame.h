@@ -37,7 +37,11 @@ struct CortoLocalMeshFrame
 
 class CortoLocalTextureFrame : public FGCObject
 {
+#if ENGINE_MAJOR_VERSION == 5
+	TObjectPtr<UTexture> m_localTexture;
+#else
 	UTexture* m_localTexture;
+#endif
 	bool m_needsSwizzle;
 public:
 	CortoLocalTextureFrame(const CortoWebpUnifiedDecodeResult* pResult);

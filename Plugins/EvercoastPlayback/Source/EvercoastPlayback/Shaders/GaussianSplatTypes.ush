@@ -1,0 +1,36 @@
+#ifndef GAUSSIAN_SPLATT_TYPES
+#define GAUSSIAN_SPLATT_TYPES
+
+
+struct DecodedSplatData
+{
+    float4 pos;
+    float4 col_a;
+    float3 scale;
+    float4 quat;
+    
+};
+
+// NOTE: Change of structure will need to be done in EvercoastGaussianSplatPassthroughResult.h too
+struct SplatViewData
+{
+    float4 pos;
+    //float4 clip_pos;
+    float2 axis1, axis2; // clip space axis but needs to be scaled up by 4???
+    //uint2 color; // 4xFP16
+    float4 diffuse_opacity;
+    float4 conic;
+    /*
+    float4 DBG_rotation;
+    float4 DBG_scale;
+    float4x4 DBG_RS;
+    float4 DBG_cov3d0, DBG_cov3d1;
+    float4 DBG_cov2d;
+    */
+    float4 spr_size_rot;
+};
+
+uint _NumSplats;
+
+
+#endif //GAUSSIAN_SPLATT_TYPES

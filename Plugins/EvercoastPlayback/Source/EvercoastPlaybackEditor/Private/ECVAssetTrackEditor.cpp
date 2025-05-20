@@ -2,6 +2,7 @@
 #include "Sequencer/ECVAssetTrack.h"
 #include "Sequencer/ECVAssetTrackSection.h"
 #include "EvercoastECVAsset.h"
+#include "EvercoastVolcapActor.h"
 #include "IContentBrowserSingleton.h"
 #include "ContentBrowserDelegates.h"
 #include "ContentBrowserModule.h"
@@ -33,20 +34,77 @@ FECVAssetTrackEditor::FECVAssetTrackEditor(TSharedRef<ISequencer> InSequencer)
 UMovieSceneTrack* FECVAssetTrackEditor::AddTrack(UMovieScene* FocusedMovieScene, const FGuid& ObjectHandle, TSubclassOf<class UMovieSceneTrack> TrackClass, FName UniqueTypeName)
 {
 	UMovieSceneTrack* Track = FocusedMovieScene->AddTrack(TrackClass, ObjectHandle);
-	//UECVAssetTrack* ECVTrack = Cast<UECVAssetTrack>(Track); // do we really need this?
 	return Track;
 }
 
 void FECVAssetTrackEditor::BuildAddTrackMenu(FMenuBuilder& MenuBuilder)
 {
-	MenuBuilder.AddMenuEntry(
-		LOCTEXT("AddTrack", "Evercoast VolCap Track"),
-		LOCTEXT("AddTooltip", "Adds a new master Evercoast volcap track that can play volcap contents."),
-		FSlateIcon(FECVAssetTrackEditorStyle::Get().GetStyleSetName(), "Sequencer.Tracks.ECV"),
-		FUIAction(
-			FExecuteAction::CreateRaw(this, &FECVAssetTrackEditor::HandleAddECVTrackMenuEntryExecute)
-		)
-	);
+}
+
+void FECVAssetTrackEditor::BuildObjectBindingTrackMenu(FMenuBuilder& MenuBuilder,
+	const TArray < FGuid >& ObjectBindings,
+	const UClass* ObjectClass)
+{
+	if (ObjectClass == AEvercoastVolcapActor::StaticClass())
+	{
+
+		MenuBuilder.AddMenuEntry(
+			LOCTEXT("AddTrack", "Evercoast VolCap Track"),
+			LOCTEXT("AddTooltip", "Adds a new bounded Evercoast volcap track."),
+			FSlateIcon(FECVAssetTrackEditorStyle::Get().GetStyleSetName(), "Sequencer.Tracks.ECV"),
+			FUIAction(
+				FExecuteAction::CreateLambda(
+					[this, ObjectBindings, ObjectClass]()
+					{
+						HandleAddECVTrackBoundMenuEntryExecute(ObjectBindings, ObjectClass);
+					}
+		)));
+	}
+}
+
+
+void FECVAssetTrackEditor::HandleAddECVTrackBoundMenuEntryExecute(const TArray < FGuid >& ObjectBindings, const UClass* ObjectClass)
+{
+	UMovieScene* FocusedMovieScene = GetFocusedMovieScene();
+	if (FocusedMovieScene == nullptr)
+	{
+		return;
+	}
+
+	if (FocusedMovieScene->IsReadOnly())
+	{
+		return;
+	}
+
+	const TSharedPtr<ISequencer> TheSequencer = GetSequencer();
+
+	
+
+	const FScopedTransaction Transaction(NSLOCTEXT("Sequencer", "AddECVTrack_Transaction", "Add ECV Track"));
+	FocusedMovieScene->Modify();
+	for (int i = 0; i < ObjectBindings.Num(); ++i)
+	{
+		FMovieSceneBinding* ObjectBinding = FocusedMovieScene->FindBinding(ObjectBindings[i]);
+		if (ObjectBinding)
+		{
+			// Create your custom track (a subclass of UMovieSceneNameableTrack)
+			UECVAssetTrack* NewTrack = NewObject<UECVAssetTrack>(FocusedMovieScene, UECVAssetTrack::StaticClass());
+			ensure(NewTrack);
+
+			// Add it to the object binding so it appears as a sub-track of that actor/component.
+#if ENGINE_MAJOR_VERSION == 5
+			ObjectBinding->AddTrack(*NewTrack, FocusedMovieScene);
+#else
+			ObjectBinding->AddTrack(*NewTrack);
+#endif
+			NewTrack->SetDisplayName(LOCTEXT("UnnamedECVTrackName", "My ECV Track"));
+
+			if (TheSequencer.IsValid())
+			{
+				TheSequencer->OnAddTrack(NewTrack, ObjectBindings[i]);
+			}
+		}
+	}
 }
 
 void FECVAssetTrackEditor::HandleAddECVTrackMenuEntryExecute()
@@ -122,7 +180,7 @@ TSharedPtr<SWidget> FECVAssetTrackEditor::BuildOutlinerEditWidget(const FGuid& O
 		.AutoWidth()
 		.VAlign(VAlign_Center)
 		[
-			FSequencerUtilities::MakeAddButton(LOCTEXT("AddECVTrackSection_Text", "ECV"), FOnGetContent::CreateLambda(CreatePicker), Params.NodeIsHovered, GetSequencer())
+			FSequencerUtilities::MakeAddButton(LOCTEXT("AddECVTrackSection_Text", "ECV/ECM"), FOnGetContent::CreateLambda(CreatePicker), Params.NodeIsHovered, GetSequencer())
 		];
 }
 
@@ -259,8 +317,31 @@ FKeyPropertyResult FECVAssetTrackEditor::AddMasterECVAsset(FFrameNumber KeyTime,
 // interfacing between MovieScene and Sequencer: UMovieSceneSection -> ISequencerSection
 TSharedRef<ISequencerSection> FECVAssetTrackEditor::MakeSectionInterface(UMovieSceneSection& SectionObject, UMovieSceneTrack& Track, FGuid ObjectBinding)
 {
-	//return FMovieSceneTrackEditor::MakeSectionInterface(SectionObject, Track, ObjectBinding);
-	return MakeShared<FECVAssetThumbnailSection>(*CastChecked<UECVAssetTrackSection>(&SectionObject), ThumbnailPool, GetSequencer());
+	// Use ObjectBinding to find bound UObject of the track. Then FECVAssetThumbnailSection should know which EvercoastVolcapActor to operate on.
+	TSharedPtr<ISequencer> TheSequencer = GetSequencer();
+
+	// We used to provide EvercoastStreamingReader to ECVAssetThumbnailSection but spawnable ones are created later, so the thumbnail has to
+	// query for the reader itself
+	/*
+	if (TheSequencer.IsValid())
+	{
+		FMovieSceneSequenceID SequenceId = TheSequencer->GetFocusedTemplateID();
+		for (TWeakObjectPtr<> WeakObject : TheSequencer->FindBoundObjects(ObjectBinding, SequenceId))
+		{
+			UObject* BoundObject = WeakObject.Get();
+			if (!BoundObject)
+				continue;
+
+			if (!BoundObject->IsA(AEvercoastVolcapActor::StaticClass()))
+				continue;
+
+			AEvercoastVolcapActor* VolcapActor = Cast<AEvercoastVolcapActor>(BoundObject);
+			return MakeShared<FECVAssetThumbnailSection>(*CastChecked<UECVAssetTrackSection>(&SectionObject), ThumbnailPool, TheSequencer, VolcapActor->Reader);
+		}
+	}
+	*/
+
+	return MakeShared<FECVAssetThumbnailSection>(*CastChecked<UECVAssetTrackSection>(&SectionObject), ThumbnailPool, TheSequencer);
 }
 
 

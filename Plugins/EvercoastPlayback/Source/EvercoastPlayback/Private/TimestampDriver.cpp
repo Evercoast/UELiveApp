@@ -28,21 +28,13 @@ void FAudioTimer::SetAudioComponent(UAudioComponent* audioComponent)
 	}
 
 	m_callbackHandle = m_audioComp->OnAudioPlaybackPercentNative.AddSP(this, &FAudioTimer::OnAudioPlaybackPercentage);
-	/*
-	m_callbackHandle = m_audioComp->OnAudioPlaybackPercentNative.AddLambda(
-		[self=this](const UAudioComponent* InComponent, const USoundWave* InSoundWave, const float InPlaybackPercentage) {
-
-			if (InSoundWave)
-				self->m_audioTimestamp = InSoundWave->GetDuration() * InPlaybackPercentage;
-		}
-	);
-	*/
 }
 
 void FAudioTimer::OnAudioPlaybackPercentage(const UAudioComponent* InComponent, const USoundWave* InSoundWave, const float InPlaybackPercentage)
 {
+	// Const cast is an UE 4.27 issue where GetDuration() should have const qualifier
 	if (InSoundWave)
-		m_audioTimestamp = InSoundWave->GetDuration() * InPlaybackPercentage;
+		m_audioTimestamp = const_cast<USoundWave*>(InSoundWave)->GetDuration() * InPlaybackPercentage;
 }
 
 float FAudioTimer::GetElapsedTime() const
@@ -69,31 +61,15 @@ void FEvercoastSequencerOverrideTimer::SetOverrideTime(float overrideCurrTime, f
 
 float FEvercoastSequencerOverrideTimer::GetElapsedTime() const
 {
-	return std::min(m_overrideCurrTime - m_loopedTime, m_blockOnTime - m_loopedTime);
-}
-
-void FEvercoastSequencerOverrideTimer::RecordLoop()
-{
-	m_loopedTime += m_duration;
+	return std::min(fmod(m_overrideCurrTime + 0.01f, m_duration), fmod(m_blockOnTime + 0.01f, m_duration));
 }
 
 void FEvercoastSequencerOverrideTimer::ResetTimer()
 {
 	m_overrideCurrTime = -1;
 	m_blockOnTime = std::numeric_limits<float>::max();
-	RecalcLoopCount();
 }
 
-void FEvercoastSequencerOverrideTimer::RecalcLoopCount()
-{
-	if (m_overrideCurrTime >= 0)
-	{
-		int loopCycles = (int)(m_overrideCurrTime / m_duration);
-		m_loopedTime = loopCycles * m_duration;
-	}
-	else
-		m_loopedTime = 0;
-}
 
 FTimestampDriver::FTimestampDriver(float duration) :
 	m_sequencerTimer(duration),
@@ -123,11 +99,6 @@ bool FTimestampDriver::IsSequencerOverriding() const
 	return m_overrideMode == OVERRIDEMODE_SEQUENCER;
 }
 
-void FTimestampDriver::RecalcSequencerTimestampOverrideLoopCount()
-{
-	m_sequencerTimer.RecalcLoopCount();
-}
-
 void FTimestampDriver::ForceChangeVideoDuration(float newDuration)
 {
 	switch (m_overrideMode)
@@ -136,7 +107,6 @@ void FTimestampDriver::ForceChangeVideoDuration(float newDuration)
 		break;
 	case OVERRIDEMODE_SEQUENCER:
 		m_sequencerTimer.m_duration = newDuration;
-		m_sequencerTimer.RecalcLoopCount(); // duration is affected, recalc the loop number
 
 		break;
 	}
@@ -232,29 +202,6 @@ void FTimestampDriver::Pause()
 	default:
 		UE_LOG(EvercoastReaderLog, Error, TEXT("Uninitialised TimestampDriver"));
 	}
-}
-
-void FTimestampDriver::MarkLoop()
-{
-	switch (m_baseMode)
-	{
-	case BASEMODE_WORLD:
-		break;
-	case BASEMODE_AUDIO:
-		break;
-	default:
-		UE_LOG(EvercoastReaderLog, Error, TEXT("Uninitialised TimestampDriver"));
-	}
-
-	switch (m_overrideMode)
-	{
-	case OVERRIDEMODE_NONE:
-		break;
-	case OVERRIDEMODE_SEQUENCER:
-		m_sequencerTimer.RecordLoop();
-		break;
-	}
-
 }
 
 float FTimestampDriver::GetElapsedTime() const

@@ -703,7 +703,7 @@ private:
 				double frameTimestamp = (double)(pFrame->pts * pStream->time_base.num) / pStream->time_base.den;
 				int64_t frameIndex = pFrame->pts / pPacket->duration;
 
-				UE_LOG(EvercoastReaderLog, Verbose, TEXT("Decoded frame=%" PRId64 ", time=%.2f"), frameIndex, frameTimestamp);
+				UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("Decoded frame=%" PRId64 ", time=%.2f"), frameIndex, frameTimestamp);
 				m_convertTextureCallback(frameTimestamp, frameIndex, pFrame->pts, pFrame->width, pFrame->height, YPitch, UPitch, VPitch,
 					pFrame->data[0], pFrame->data[1], pFrame->data[2]);
 
@@ -721,6 +721,8 @@ private:
 			UE_LOG(EvercoastReaderLog, Error, TEXT("Error seeking to timestamp: %.2f, frame: %lld"), m_seekTargetTimestamp, Timestamp2Framenumber(m_seekTargetTimestamp));
 			return false;
 		}
+
+		UE_LOG(EvercoastReaderLog, Verbose, TEXT("Video seeked to timestamp: %.2f"), m_seekTargetTimestamp);
 
 		avcodec_flush_buffers(m_videoCodecCtx);
 
@@ -805,7 +807,13 @@ UFFmpegVideoTextureHog::UFFmpegVideoTextureHog(const FObjectInitializer& ObjectI
 	m_videoFrameRate(-1),
 	m_textureBufferStart(0),
 	m_textureBufferEnd(0),
+	
+	m_currSeekingTarget(0),
+	m_currSeekingTargetPrecache(0),
+	m_currSeekingTargetPostcache(0),
+	m_lastQueriedTextureIndex(-1),
 	m_videoDuration(0),
+
 #if FORCE_NV12_CPU_CONVERSION
 	m_scratchPadRGBA(nullptr),
 #endif
@@ -911,7 +919,7 @@ bool UFFmpegVideoTextureHog::OpenSource(UMediaSource* source)
 
 void UFFmpegVideoTextureHog::OnVideoOpened(int64_t avformat_duration, int32_t frame_rate, int frame_width, int frame_height)
 {
-	std::lock_guard<std::mutex> guard(m_controlBitMutex);
+	std::lock_guard<std::recursive_mutex> guard(m_controlBitMutex);
 	// save the params and leave to main thread to work on it.
 	m_videoOpenParams = {
 		true,
@@ -920,6 +928,10 @@ void UFFmpegVideoTextureHog::OnVideoOpened(int64_t avformat_duration, int32_t fr
 		frame_width,
 		frame_height
 	};
+
+	m_currSeekingTarget = 0;
+	m_currSeekingTargetPrecache = 0;
+	m_currSeekingTargetPostcache = 2.0;
 }
 
 bool UFFmpegVideoTextureHog::IsVideoOpened()
@@ -937,17 +949,35 @@ void UFFmpegVideoTextureHog::OnVideoEndReached(int64_t last_frame_index)
 {
 	m_videoEndFrameIndex = last_frame_index;
 	m_videoEndReached = true;
+
+	std::lock_guard<std::recursive_mutex> guard(m_textureRecordMutex);
+
+	const UTextureRecord* const* ppTR = m_textureBuffer.FindByPredicate([last_frame_index](const UTextureRecord* tr)
+		{
+			return tr->frameIndex == last_frame_index;
+		});
+
+	if (ppTR && *ppTR && m_videoDuration > (*ppTR)->frameTimestamp)
+	{
+		m_videoDuration = (*ppTR)->frameTimestamp;
+	}
 }
 
 bool UFFmpegVideoTextureHog::ResetTo(double timestamp, const std::function<void()>& callback)
 {
-	if (timestamp < 0)
-		timestamp = 0;
-
 	if (!m_videoOpened)
 		return false;
 
-	m_runnable->CommandSeekTo(timestamp, 
+	m_currSeekingTarget = timestamp;
+
+	// Including the 1 sec precache
+	m_currSeekingTargetPrecache = timestamp - 1.0;
+	if (m_currSeekingTargetPrecache < 0)
+		m_currSeekingTargetPrecache = 0;
+
+	m_currSeekingTargetPostcache = m_currSeekingTargetPrecache + 2.0;
+
+	m_runnable->CommandSeekTo(m_currSeekingTargetPrecache,
 #if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 3
 		[=, this]() 
 #else
@@ -964,28 +994,7 @@ bool UFFmpegVideoTextureHog::ResetTo(double timestamp, const std::function<void(
 		});
 	return true;
 }
-bool UFFmpegVideoTextureHog::JumpBy(double timestampOffset, const std::function<void()>& callback)
-{
-	if (!m_videoOpened)
-		return false;
 
-	m_runnable->CommandSeekRelative(timestampOffset, 
-#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 3
-		[=, this]()
-#else
-		[=]()
-#endif
-		{
-			m_videoEndReached = false;
-			m_videoEndFrameIndex = -1;
-
-			// Should be completed here
-			InvalidateAllTextures();
-
-			callback();
-		});
-	return true;
-}
 bool UFFmpegVideoTextureHog::StartHogging()
 {
 	if (!m_videoOpened)
@@ -1010,23 +1019,8 @@ bool UFFmpegVideoTextureHog::IsEndReached() const
 {
 	if (m_videoEndReached)
 	{
-		std::lock_guard<std::mutex> guard(m_textureRecordMutex);
-
-		// search through buffers finding the largest frame index
-		int64_t largestUsedFrameIndex = -1;
-		for (int i = 0; i < m_textureBuffer.Num(); ++i)
-		{
-			if (m_textureBuffer[i]->isUsed && largestUsedFrameIndex < m_textureBuffer[i]->frameIndex)
-			{
-				largestUsedFrameIndex = m_textureBuffer[i]->frameIndex;
-			}
-		}
-
-		// Because the hogging thread will hog frame beforehead, 
-		// the true moment of video ending reached in a reader component point of view, it is when the last frame
-		// from the hog is retrieved and invalidated.
-		// So if all frames are used, or the used largest frame matches the video end frame, it's the real end
-		if (largestUsedFrameIndex == m_videoEndFrameIndex || m_textureBufferEnd == m_textureBufferStart)
+		std::lock_guard<std::recursive_mutex> guard(m_textureRecordMutex);
+		if (m_lastQueriedTextureIndex == m_videoEndFrameIndex || m_textureBufferEnd == m_textureBufferStart)
 			return true;
 
 	}
@@ -1035,7 +1029,7 @@ bool UFFmpegVideoTextureHog::IsEndReached() const
 
 bool UFFmpegVideoTextureHog::IsFull() const
 {
-	std::lock_guard<std::mutex> guard(m_textureRecordMutex);
+	std::lock_guard<std::recursive_mutex> guard(m_textureRecordMutex);
 
     if ((m_textureBufferEnd + 1) % RING_QUEUE_SIZE != m_textureBufferStart)
 	{
@@ -1059,13 +1053,13 @@ bool UFFmpegVideoTextureHog::IsFrameIndexWithinDuration(int64_t frameIndex) cons
 }
 bool UFFmpegVideoTextureHog::IsHoggingPausedDueToFull() const
 {
-	std::lock_guard<std::mutex> guard(m_controlBitMutex);
+	std::lock_guard<std::recursive_mutex> guard(m_controlBitMutex);
 	return m_hoggingStoppedDueToFullBuffer;
 }
 
 void UFFmpegVideoTextureHog::RestartHoggingIfPausedDueToFull()
 {
-	std::lock_guard<std::mutex> guard(m_controlBitMutex);
+	std::lock_guard<std::recursive_mutex> guard(m_controlBitMutex);
 
 	if (m_hoggingStoppedDueToFullBuffer)
 	{
@@ -1094,7 +1088,7 @@ void UFFmpegVideoTextureHog::OnConvertNV12Texture(double timestamp, int64_t fram
 
 	// Scope here to avoid later call to IsFull() being mutex out 
 	{
-		std::lock_guard<std::mutex> guard(m_textureRecordMutex);
+		std::lock_guard<std::recursive_mutex> guard(m_textureRecordMutex);
 
 		UTextureRecord* pOutput = m_textureBuffer[m_textureBufferEnd];
 
@@ -1255,13 +1249,13 @@ void UFFmpegVideoTextureHog::OnConvertNV12Texture(double timestamp, int64_t fram
 
 void UFFmpegVideoTextureHog::OnFull(bool isFull)
 {
-	std::lock_guard<std::mutex> guard1(m_controlBitMutex);
+	std::lock_guard<std::recursive_mutex> guard1(m_controlBitMutex);
 	m_hoggingStoppedDueToFullBuffer = isFull;
 }
 
 void UFFmpegVideoTextureHog::Tick(UWorld* world)
 {
-	std::lock_guard<std::mutex> guard(m_controlBitMutex);
+	std::lock_guard<std::recursive_mutex> guard(m_controlBitMutex);
 	// We need to do this because textures are supposed to be initialised on main thread
 	if (m_videoOpenParams.isPending)
 	{
@@ -1272,11 +1266,15 @@ void UFFmpegVideoTextureHog::Tick(UWorld* world)
 
 		DrainRHICommandList();
 
-		// we need a ring queue that can fit at least 2 second of data
-		// (Defaultly we encoded with one keyframe per 30 frames, so 1 keyframe per 2 seconds)
-		if (m_videoFrameRate * 2 > m_textureBuffer.Num())
+		// WHY we need a ring queue that can fit at least 3 second of data ???
+		// because the encoded videos are not necessarily 15 or 30 frames give a keyframe so to be safe,
+		// instead of cache 1 sec prior and after to the seek target, respectively, we'll need 1.5 sec for each.
+		// also, sometimes ffmpeg doesn't always seek to the nearest keyframe for some reason, so we'll need larger pool
+		const int SIZE_MULTIPLIER = 3; // <- Might need to change if see worse cases
+
+		if (m_videoFrameRate * SIZE_MULTIPLIER > m_textureBuffer.Num())
 		{
-			RING_QUEUE_SIZE = (int)(m_videoFrameRate * 2 + 0.5f);
+			RING_QUEUE_SIZE = (int)(m_videoFrameRate * SIZE_MULTIPLIER + 0.5f);
 
 			m_textureBuffer.SetNumZeroed(RING_QUEUE_SIZE, true);
 			for (int i = 0; i < m_textureBuffer.Num(); ++i)
@@ -1374,18 +1372,25 @@ float UFFmpegVideoTextureHog::GetVideoDuration() const
 
 UTexture* UFFmpegVideoTextureHog::QueryTextureAtIndex(int64_t frameIndex) const
 {
-	std::lock_guard<std::mutex> guard(m_textureRecordMutex);
+	std::lock_guard<std::recursive_mutex> guard(m_textureRecordMutex);
 
 	const UTextureRecord *const * ppTR = m_textureBuffer.FindByPredicate([frameIndex](const UTextureRecord* tr)
 		{
 			return tr->frameIndex == frameIndex && !tr->isUsed;
 		});
-	return ppTR ? (*ppTR)->texture : nullptr;
+
+	if (ppTR)
+	{
+		m_lastQueriedTextureIndex = frameIndex;
+		return (*ppTR)->texture;
+	}
+
+	return nullptr;
 }
 // mark textures from the start till the requested texture as invalid
 bool UFFmpegVideoTextureHog::InvalidateTextureAndBefore(UTexture* pTex)
 {
-	std::lock_guard<std::mutex> guard(m_textureRecordMutex);
+	std::lock_guard<std::recursive_mutex> guard(m_textureRecordMutex);
 
     int32 IndexFound = m_textureBuffer.IndexOfByPredicate([pTex](const UTextureRecord* tr)
 		{
@@ -1417,7 +1422,7 @@ bool UFFmpegVideoTextureHog::InvalidateTextureAndBefore(UTexture* pTex)
 // mark textures from the start till the texture which has the requested frame index as invalid
 bool UFFmpegVideoTextureHog::InvalidateTextureAndBeforeByFrameIndex(int64_t frameIndex)
 {
-	std::lock_guard<std::mutex> guard(m_textureRecordMutex);
+	std::lock_guard<std::recursive_mutex> guard(m_textureRecordMutex);
 
     bool hasFound = false;
 	for (int i = 0; i < m_textureBuffer.Num(); ++i)
@@ -1437,7 +1442,7 @@ bool UFFmpegVideoTextureHog::InvalidateTextureAndBeforeByFrameIndex(int64_t fram
 // mark all textures as invalid
 void UFFmpegVideoTextureHog::InvalidateAllTextures()
 {
-	std::lock_guard<std::mutex> guard(m_textureRecordMutex);
+	std::lock_guard<std::recursive_mutex> guard(m_textureRecordMutex);
 
     for (int i = 0; i < m_textureBuffer.Num(); ++i)
 	{
@@ -1452,7 +1457,7 @@ void UFFmpegVideoTextureHog::InvalidateAllTextures()
 // -----|<--- f --->|-----
 bool UFFmpegVideoTextureHog::IsFrameWithinCachedRange(int64_t frameIndex) const
 {
-	std::lock_guard<std::mutex> guard(m_textureRecordMutex);
+	std::lock_guard<std::recursive_mutex> guard(m_textureRecordMutex);
 
     int64_t rangeStart = std::numeric_limits<int64>::max();
 	int64_t rangeEnd = -1;
@@ -1478,7 +1483,7 @@ bool UFFmpegVideoTextureHog::IsFrameWithinCachedRange(int64_t frameIndex) const
 // -----|<--------->|--f--
 bool UFFmpegVideoTextureHog::IsFrameBeyondCachedRange(int64_t frameIndex) const
 {
-	std::lock_guard<std::mutex> guard(m_textureRecordMutex);
+	std::lock_guard<std::recursive_mutex> guard(m_textureRecordMutex);
 
     int64_t rangeStart = std::numeric_limits<int64>::max();
 	int64_t rangeEnd = -1;
@@ -1505,7 +1510,7 @@ bool UFFmpegVideoTextureHog::IsFrameBeyondCachedRange(int64_t frameIndex) const
 // --f--|<--------->|-----
 bool UFFmpegVideoTextureHog::IsFrameBeforeCachedRange(int64_t frameIndex) const
 {
-	std::lock_guard<std::mutex> guard(m_textureRecordMutex);
+	std::lock_guard<std::recursive_mutex> guard(m_textureRecordMutex);
 
     int64_t rangeStart = std::numeric_limits<int64>::max();
 	int64_t rangeEnd = -1;
@@ -1527,4 +1532,139 @@ bool UFFmpegVideoTextureHog::IsFrameBeforeCachedRange(int64_t frameIndex) const
 	}
 
 	return frameIndex < rangeStart && frameIndex < rangeEnd;
+}
+
+void UFFmpegVideoTextureHog::TrimCache(double medianTimestamp, double halfFrameInterval)
+{
+	std::lock_guard<std::recursive_mutex> guard(m_textureRecordMutex);
+
+	
+	int medianIndex = -1;
+	for (int i = m_textureBufferStart; i != m_textureBufferEnd; i = (i + 1) % RING_QUEUE_SIZE)
+	{
+		auto& record = m_textureBuffer[i];
+		if (abs(record->frameTimestamp - medianTimestamp) <= halfFrameInterval)
+		{
+			medianIndex = i;
+			break;
+		}
+	}
+
+	int halfCacheWidth = RING_QUEUE_SIZE / 2;
+
+	bool hasTrimmed = false;
+	if (medianIndex >= 0)
+	{
+		int medianDistanceToHead;
+
+		// trim head
+		if (m_textureBufferStart < medianIndex)
+		{
+			if (medianIndex - m_textureBufferStart > halfCacheWidth)
+			{
+				m_textureBufferStart = medianIndex - halfCacheWidth;
+				hasTrimmed = true;
+			}
+
+			medianDistanceToHead = medianIndex - m_textureBufferStart;
+		}
+		else if (medianIndex < m_textureBufferStart)
+		{
+			if (medianIndex + RING_QUEUE_SIZE - m_textureBufferStart > halfCacheWidth)
+			{
+				m_textureBufferStart = (medianIndex + RING_QUEUE_SIZE - halfCacheWidth) % RING_QUEUE_SIZE;
+				hasTrimmed = true;
+			}
+
+			medianDistanceToHead = medianIndex + RING_QUEUE_SIZE - m_textureBufferStart;
+		}
+		else
+		{
+			// median == start, no trimming
+			medianDistanceToHead = 0;
+		}
+
+		// trim tail
+		if (medianDistanceToHead >= halfCacheWidth) // only consider trim tail when head<->median has grown to size
+		{
+			if (medianIndex < m_textureBufferEnd)
+			{
+				if (m_textureBufferEnd - medianIndex > halfCacheWidth)
+				{
+					m_textureBufferEnd = medianIndex + halfCacheWidth;
+					hasTrimmed = true;
+				}
+			}
+			else if (medianIndex > m_textureBufferEnd)
+			{
+				if (m_textureBufferEnd + RING_QUEUE_SIZE - medianIndex > halfCacheWidth)
+				{
+					m_textureBufferEnd = (medianIndex + halfCacheWidth - RING_QUEUE_SIZE) % RING_QUEUE_SIZE;
+					hasTrimmed = true;
+				}
+			}
+			else
+			{
+				// median == end, no trimming
+			}
+		}
+
+		
+	}
+	else if (m_textureBuffer.Num() > 0)
+	{
+		// check if the median timestamp is totally running out of cache range
+		if (!(m_currSeekingTargetPrecache <= medianTimestamp && medianTimestamp <= m_currSeekingTargetPostcache))
+		{
+			int lastElementIdx = m_textureBufferEnd - 1;
+			if (lastElementIdx < 0)
+			{
+				lastElementIdx += RING_QUEUE_SIZE;
+			}
+
+			if (!m_textureBuffer[lastElementIdx] || medianTimestamp > m_textureBuffer[lastElementIdx]->frameTimestamp)
+			{
+				// reset
+				InvalidateAllTextures();
+
+				UE_LOG(EvercoastReaderLog, Verbose, TEXT("Video Trimmed Diposed"));
+				hasTrimmed = true;
+			}
+		}
+	}
+
+	if (hasTrimmed)
+	{
+		m_currSeekingTargetPrecache = medianTimestamp - 1.0;
+		if (m_currSeekingTargetPrecache < 0)
+			m_currSeekingTargetPrecache = 0;
+		m_currSeekingTarget = medianTimestamp;
+		m_currSeekingTargetPostcache = m_currSeekingTargetPrecache + 2.0;
+
+		RestartHoggingIfPausedDueToFull();
+
+		UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("Video Trimmed: median: %.2f head(%d): %.2f -> tail(%d): %.2f"), medianTimestamp, m_textureBufferStart, m_textureBuffer[m_textureBufferStart]->frameTimestamp, m_textureBufferEnd, m_textureBufferEnd == 0 ? m_textureBuffer[RING_QUEUE_SIZE - 1]->frameTimestamp : m_textureBuffer[m_textureBufferEnd - 1]->frameTimestamp);
+	}
+}
+
+
+bool UFFmpegVideoTextureHog::IsTextureBeyondRange(double timestamp, double halfFrameInterval) const
+{
+	std::lock_guard<std::recursive_mutex> guard(m_textureRecordMutex);
+
+	if (m_textureBufferEnd == m_textureBufferStart)
+		return true; // empty
+
+	int lastElementIdx = m_textureBufferEnd - 1;
+	if (lastElementIdx < 0)
+	{
+		lastElementIdx += RING_QUEUE_SIZE;
+	}
+
+	if (m_textureBuffer[lastElementIdx] && m_textureBuffer[lastElementIdx]->frameTimestamp + halfFrameInterval < timestamp)
+	{
+		return true;
+	}
+
+	return false;
 }

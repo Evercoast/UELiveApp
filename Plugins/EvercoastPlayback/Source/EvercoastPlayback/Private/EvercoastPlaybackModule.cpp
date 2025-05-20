@@ -14,7 +14,7 @@
 #include "Interfaces/IPluginManager.h"
 #include "GhostTreeFormatReader.h"
 #include "InstructionSet.h"
-#include "EvercoastDecoder.h"
+#include "EvercoastVoxelDecoder.h"
 #include "picoquic.h"
 #include "Realtime/EvercoastRealtimeConfig.h"
 #include "ec_decoder_compatibility.h"
@@ -68,7 +68,7 @@ void FEvercoastPlaybackModule::StartupModule()
 	}
 	else
 	{
-		UE_LOG(EvercoastDecoderLog, Error, TEXT("This desktop CPU doesn't support AVX2 instruction set. ECV files won't be able to playback!"));
+		UE_LOG(EvercoastVoxelDecoderLog, Error, TEXT("This desktop CPU doesn't support AVX2 instruction set. ECV files won't be able to playback!"));
 	}
 
 	// This plugin is loaded earlier, so UEvercoastRealtimeConfig has to be configured after UObject's initialisation

@@ -5,7 +5,10 @@
 #include "CortoWebpUnifiedDecodeResult.h"
 
 CortoDataUploader::CortoDataUploader(UCortoMeshRendererComp* rendererComponent) :
-	m_localTextureFrame(nullptr), m_rendererComponent(rendererComponent), m_dataDirty(false)
+	m_localTextureFrame(nullptr), 
+	m_rendererComponent(rendererComponent), 
+	m_dataDirty(false), 
+	m_lastUploadedFrameIndex(-1)
 {
 
 }
@@ -41,7 +44,7 @@ void CortoDataUploader::Upload(const GenericDecodeResult* pCortoResult)
 {
 	const CortoWebpUnifiedDecodeResult* pResult = static_cast<const CortoWebpUnifiedDecodeResult*>(pCortoResult);
 	pResult->Lock();
-	if (pResult->DecodeSuccessful)
+	if (pResult->DecodeSuccessful && m_lastUploadedFrameIndex != pResult->frameIndex)
 	{
 		m_localMeshFrame = std::make_shared<CortoLocalMeshFrame>(pResult);
         
@@ -60,6 +63,8 @@ void CortoDataUploader::Upload(const GenericDecodeResult* pCortoResult)
 		pResult->Unlock();
 		
 		ForceUpload();
+
+		m_lastUploadedFrameIndex = pResult->frameIndex;
 	}
 	else
 	{
@@ -71,4 +76,5 @@ void CortoDataUploader::ReleaseLocalResource()
 {
 	m_localMeshFrame.reset();
 	m_localTextureFrame.reset();
+	m_lastUploadedFrameIndex = -1;
 }

@@ -29,7 +29,6 @@ public:
 	virtual bool IsVideoOpened() override;
 	virtual bool Close() override;
 	virtual bool ResetTo(double timestmap, const std::function<void()>& callback = [](){} ) override;
-	virtual bool JumpBy(double timestampOffset, const std::function<void()>& callback = []() {}) override;
 	virtual bool StartHogging() override;
 	virtual bool StopHogging() override;
 	virtual bool IsHogging() const override;
@@ -54,8 +53,10 @@ public:
 	virtual bool IsFrameBeyondCachedRange(int64_t frameIndex) const override;
 	// --f--|<--------->|-----
 	virtual bool IsFrameBeforeCachedRange(int64_t frameIndex) const override;
+	// Trim the cache falls out side of the median +/- halfCacheWidth
+	virtual void TrimCache(double medianTimestamp, double halfFrameInterval) override;
 
-
+	virtual bool IsTextureBeyondRange(double timestamp, double halfFrameInterval) const;
 private:
 	void OnVideoOpened(int64_t avformat_duration, int32_t frame_rate, int frame_width, int frame_height);
 	void OnVideoEndReached(int64_t last_frame_index);
@@ -86,6 +87,11 @@ private:
 	int32_t				m_videoFrameRate = -1;
 	int32_t 			m_textureBufferStart;
 	int32_t 			m_textureBufferEnd;
+
+	double				m_currSeekingTarget;
+	double				m_currSeekingTargetPrecache;
+	double				m_currSeekingTargetPostcache;
+	mutable int64_t		m_lastQueriedTextureIndex;
 	
 	double				m_videoDuration = 0;
 
@@ -102,11 +108,11 @@ private:
 	uint8* m_scratchPadV;
 
 	// threading
-	FFFmpegDecodingThread*		m_runnable;
-	FRunnableThread*			m_runnableController;
-	mutable std::mutex			m_textureRecordMutex;
-	mutable std::mutex			m_controlBitMutex;
+	FFFmpegDecodingThread*					m_runnable;
+	FRunnableThread*						m_runnableController;
+	mutable std::recursive_mutex			m_textureRecordMutex;
+	mutable std::recursive_mutex			m_controlBitMutex;
 
-	std::promise<void>			m_renderThreadPromise;
-	std::future<void>			m_renderThreadFuture;
+	std::promise<void>						m_renderThreadPromise;
+	std::future<void>						m_renderThreadFuture;
 };

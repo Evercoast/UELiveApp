@@ -32,6 +32,9 @@ public:
 	void StopPreviewInEditor();
 #endif
 
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Livestreaming")
+	void Resync();
+
 
 	virtual void Tick(float DeltaTime) override;
 

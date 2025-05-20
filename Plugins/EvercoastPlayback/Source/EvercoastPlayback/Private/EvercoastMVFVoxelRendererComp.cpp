@@ -11,8 +11,8 @@
 
 #include "EvercoastMVFVoxelRendererComp.h"
 #include "EvercoastLocalVoxelFrame.h"
-#include "ECV/VoxelSceneProxy.h"
-#include "EvercoastBasicStreamingDataUploader.h"
+#include "ECV/MVFVoxelSceneProxy.h"
+#include "VoxelDataUploader.h"
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -42,7 +42,7 @@ UEvercoastMVFVoxelRendererComp::UEvercoastMVFVoxelRendererComp(const FObjectInit
 	//bTickInEditor = true; // need this to tick and subsequently call MarkRenderTransformDirty()
 	//bUseAttachParentBound = false;
 	m_dirtyMark = true;
-	m_voxelUploader = std::make_shared<EvercoastBasicStreamingDataUploader>(this);
+	m_voxelUploader = std::make_shared<VoxelDataUploader>(this);
 }
 
 std::shared_ptr<IEvercoastStreamingDataUploader> UEvercoastMVFVoxelRendererComp::GetVoxelDataUploader() const
@@ -65,7 +65,7 @@ FPrimitiveSceneProxy* UEvercoastMVFVoxelRendererComp::CreateSceneProxy()
 	if (!SceneProxy)
 	{
 		// whenever creates a new scene proxy, we mark both the voxel data and transform/bounds data dirty so that they gets updated in Tick()
-		return new FVoxelSceneProxy(this, m_currLocalVoxelFrame);
+		return new FMVFVoxelSceneProxy(this, m_currLocalVoxelFrame);
 	}
 
 	return SceneProxy;
@@ -98,7 +98,7 @@ FBoxSphereBounds UEvercoastMVFVoxelRendererComp::CalcLocalBounds() const
 		return m_currLocalVoxelFrame->CalcBounds();
 	}
 
-	return FVoxelSceneProxy::GetDefaultVoxelDataBounds();
+	return FMVFVoxelSceneProxy::GetDefaultVoxelDataBounds();
 }
 
 void UEvercoastMVFVoxelRendererComp::SetVoxelData(std::shared_ptr<EvercoastLocalVoxelFrame> localVoxelFrame)
@@ -106,7 +106,7 @@ void UEvercoastMVFVoxelRendererComp::SetVoxelData(std::shared_ptr<EvercoastLocal
 	m_currLocalVoxelFrame = localVoxelFrame;
 
 	std::shared_ptr<EvercoastLocalVoxelFrame> voxelFrame = localVoxelFrame;
-	FVoxelSceneProxy* sceneProxy = (FVoxelSceneProxy*)(this->SceneProxy);
+	FMVFVoxelSceneProxy* sceneProxy = (FMVFVoxelSceneProxy*)(this->SceneProxy);
 	
 	ENQUEUE_RENDER_COMMAND(FEvercoastVoxelDataUpdate)(
 		[sceneProxy, voxelFrame](FRHICommandListImmediate& RHICmdList)

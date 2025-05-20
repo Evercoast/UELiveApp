@@ -5,7 +5,7 @@
 * @Author: Ye Feng
 * @Date:   2021-11-17 02:28:37
 * @Last Modified by:   feng_ye
-* @Last Modified time: 2024-05-02 05:26:53
+* @Last Modified time: 2025-03-25 13:41:11
 */
 using System;
 using System.IO;
@@ -94,6 +94,7 @@ public class EvercoastPlayback : ModuleRules
 			"AudioMixer",
 			"SignalProcessing",
 			"HTTP",
+			"Niagara"
 		});
 
 		PublicDependencyModuleNames.AddRange(
@@ -389,6 +390,14 @@ public class EvercoastPlayback : ModuleRules
 		{
 			// Not supported platform, fail the build
 			throw new EvercoastUnsupportedPlatformException();
+		}
+
+		// Zstd
+		PublicIncludePaths.Add(Path.Combine(ThirdPartyRoot, "zstd", "include"));
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "zstd", "dll", "libzstd.dll.a"));
+			RuntimeDependencies.Add("$(BinaryOutputDir)/libzstd.dll", Path.Combine(ThirdPartyRoot, "zstd", "dll", "libzstd.dll"));
 		}
 
 		if (Target.Platform == UnrealTargetPlatform.Android)

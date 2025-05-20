@@ -15,5 +15,5 @@ public:
     UPROPERTY(Config, BlueprintReadOnly)
     FString AccessToken;
     UPROPERTY(Config, BlueprintReadOnly)
-    float WarmUpTime = 1.0f;
+    float WarmUpTime = 0.0f;
 };

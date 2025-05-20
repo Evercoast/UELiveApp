@@ -4,7 +4,7 @@
 #include "RenderUtils.h"
 #include "MeshMaterialShader.h"
 #include "EvercoastVoxelSceneProxy.h"
-#include "EvercoastDecoder.h"
+#include "EvercoastVoxelDecoder.h"
 #include "EvercoastLocalVoxelFrame.h"
 #include "MaterialShared.h"
 #if ENGINE_MAJOR_VERSION == 5
@@ -58,8 +58,6 @@ public:
 			ShaderBindings.Add(Shader->GetUniformBufferParameter<FLocalVertexFactoryUniformShaderParameters>(), VertexFactoryUniformBuffer);
 		}
 		
-		InstancedCubeVertexFactory->SceneProxy->LockVoxelData();
-
 		auto voxelFrame = InstancedCubeVertexFactory->GetInstancingData();
 		ShaderBindings.Add(BoundsMin, voxelFrame->m_boundsMin);
 		ShaderBindings.Add(BoundsDim, voxelFrame->m_boundsDim);
@@ -71,7 +69,6 @@ public:
 		ShaderBindings.Add(PositionsSRV, InstancedCubeVertexFactory->m_positionsSRV);
 		ShaderBindings.Add(ColoursSRV, InstancedCubeVertexFactory->m_coloursSRV);
 
-		InstancedCubeVertexFactory->SceneProxy->UnlockVoxelData();
 	};
 private:
 	
@@ -83,77 +80,30 @@ private:
 	LAYOUT_FIELD(FShaderResourceParameter, ColoursSRV);
 };
 
-/*
-class FEvercoastInstancedCubeVertexFactoryShaderParametersPS : public FVertexFactoryShaderParameters
-{
-	DECLARE_TYPE_LAYOUT(FEvercoastInstancedCubeVertexFactoryShaderParametersPS, NonVirtual);
-public:
-	void Bind(const FShaderParameterMap& ParameterMap)
-	{
-		ColoursSRV.Bind(ParameterMap, TEXT("Evercoast_Colours"), SPF_Optional);
-	};
-
-	void GetElementShaderBindings(
-		const class FSceneInterface* Scene,
-		const FSceneView* View,
-		const class FMeshMaterialShader* Shader,
-		const EVertexInputStreamType InputStreamType,
-		ERHIFeatureLevel::Type FeatureLevel,
-		const FVertexFactory* VertexFactory,
-		const FMeshBatchElement& BatchElement,
-		class FMeshDrawSingleShaderBindings& ShaderBindings,
-		FVertexInputStreamArray& VertexStreams
-	) const
-	{
-		const FEvercoastInstancedCubeVertexFactory* InstancedCubeVertexFactory = ((const FEvercoastInstancedCubeVertexFactory*)VertexFactory);
-
-		FRHIUniformBuffer* VertexFactoryUniformBuffer = static_cast<FRHIUniformBuffer*>(BatchElement.VertexFactoryUserData);
-
-		if (InstancedCubeVertexFactory->SupportsManualVertexFetch(FeatureLevel) || UseGPUScene(GMaxRHIShaderPlatform, FeatureLevel))
-		{
-			if (!VertexFactoryUniformBuffer)
-			{
-				// No batch element override
-				VertexFactoryUniformBuffer = InstancedCubeVertexFactory->GetUniformBuffer();
-			}
-
-			ShaderBindings.Add(Shader->GetUniformBufferParameter<FLocalVertexFactoryUniformShaderParameters>(), VertexFactoryUniformBuffer);
-		}
-
-		ShaderBindings.Add(ColoursSRV, InstancedCubeVertexFactory->SceneProxy->GetVoxelColoursSRV());
-	};
-private:
-	LAYOUT_FIELD(FShaderResourceParameter, ColoursSRV);
-};
-*/
-
-/*
-// ~Beginning of Global shader uniform struct
-BEGIN_GLOBAL_SHADER_PARAMETER_STRUCT(FEvercoastInstancedCubeVertexFactoryUniformShaderParameters, )
-	SHADER_PARAMETER(uint32, TransformIndex)
-END_GLOBAL_SHADER_PARAMETER_STRUCT()
-
-IMPLEMENT_GLOBAL_SHADER_PARAMETER_STRUCT(FEvercoastInstancedCubeVertexFactoryUniformShaderParameters, "EvercoastVF");
-// ~End of Global shader uniform struct
-*/
 
 IMPLEMENT_TYPE_LAYOUT(FEvercoastInstancedCubeVertexFactoryShaderParameters);
-//IMPLEMENT_TYPE_LAYOUT(FEvercoastInstancedCubeVertexFactoryShaderParametersPS);
 
 IMPLEMENT_VERTEX_FACTORY_PARAMETER_TYPE(FEvercoastInstancedCubeVertexFactory, SF_Vertex, FEvercoastInstancedCubeVertexFactoryShaderParameters);
-//IMPLEMENT_VERTEX_FACTORY_PARAMETER_TYPE(FEvercoastInstancedCubeVertexFactory, SF_Pixel, FEvercoastInstancedCubeVertexFactoryShaderParametersPS);
 
 #if ENGINE_MAJOR_VERSION >= 5
-#if ENGINE_MINOR_VERSION >= 1
 
-IMPLEMENT_VERTEX_FACTORY_TYPE(FEvercoastInstancedCubeVertexFactory, "/EvercoastShaders/EvercoastLocalVertexFactory.ush",
+#if ENGINE_MINOR_VERSION >= 4
+IMPLEMENT_VERTEX_FACTORY_TYPE(FEvercoastInstancedCubeVertexFactory, "/EvercoastShaders/EvercoastLocalVertexFactory_5_4.ush",
 	EVertexFactoryFlags::UsedWithMaterials
 	| EVertexFactoryFlags::SupportsDynamicLighting
 	| EVertexFactoryFlags::SupportsPrecisePrevWorldPos
 	| EVertexFactoryFlags::SupportsPositionOnly
 );
-#else
 
+#elif ENGINE_MINOR_VERSION >= 1
+IMPLEMENT_VERTEX_FACTORY_TYPE(FEvercoastInstancedCubeVertexFactory, "/EvercoastShaders/EvercoastLocalVertexFactory_5_1.ush",
+	EVertexFactoryFlags::UsedWithMaterials
+	| EVertexFactoryFlags::SupportsDynamicLighting
+	| EVertexFactoryFlags::SupportsPrecisePrevWorldPos
+	| EVertexFactoryFlags::SupportsPositionOnly
+);
+
+#else
 IMPLEMENT_VERTEX_FACTORY_TYPE(FEvercoastInstancedCubeVertexFactory, "/EvercoastShaders/EvercoastLocalVertexFactory_5_0.ush",
 	EVertexFactoryFlags::UsedWithMaterials
 	| EVertexFactoryFlags::SupportsDynamicLighting

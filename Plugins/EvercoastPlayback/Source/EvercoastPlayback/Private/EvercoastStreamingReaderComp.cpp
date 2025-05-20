@@ -2,11 +2,10 @@
 
 
 #include "EvercoastStreamingReaderComp.h"
-#include "EvercoastDecoder.h"
+#include "EvercoastVoxelDecoder.h"
 #include "CortoDecoder.h"
 #include "WebpDecoder.h"
-#include "EvercoastBasicStreamingDataDecoder.h"
-#include "EvercoastBasicStreamingDataUploader.h"
+#include "Gaussian/EvercoastGaussianSplatDecoder.h"
 #include "CortoDataUploader.h"
 #include "EvercoastAsyncStreamingDataDecoder.h"
 #include "EvercoastRendererSelectorComp.h"
@@ -18,7 +17,6 @@
 #include "Kismet/GameplayStatics.h"
 
 #include "FFmpegVideoTextureHog.h"
-#include "ElectraVideoTextureHog.h"
 
 #include "EvercoastMediaSoundComp.h"
 #include "MediaPlayer.h"
@@ -163,30 +161,29 @@ public:
 // Sets default values for this component's properties
 UEvercoastStreamingReaderComp::UEvercoastStreamingReaderComp(const FObjectInitializer& ObjectInitializer) :
 	Super(ObjectInitializer),
-	bAsyncDataDecoding(true),
 	bPreferVideoCodec(false),
 	bAutoPlay(true),
 	bLoop(true),
 	bSlackTiming(false),
 	Renderer(nullptr),
 	RendererActor(nullptr),
-	m_currReadTimestamp(0),
+	m_baseDecoderType(DT_Invalid),
 	m_playbackStatus(PlaybackStatus::Stopped),
 	m_isReaderWaitingForData(true),
 	m_isReaderInSeeking(false),
 	m_isReaderPlaybackReady(false),
 	m_isReaderWaitingForAudioData(true),
-	m_isReaderWaitingForVideoData(false),
 	m_videoTextureHog(nullptr),
 	m_syncStatus(SyncStatus::InSync),
 	m_lastMismatchedFrame(-1),
 	m_consecutiveMismatchedFrameCount(0),
 	m_playbackInitSeek(0),
-	m_geomFeedStarvingStartTime(0),
-	m_cortoTexSeekStage(CTS_NA),
+	m_gtSeekStage(GTS_DEFAULT),
+	m_vdSeekStage(VDS_DEFAULT),
 	m_readerHasFatalError(false),
 	m_currentMatchingFrameNumber(0),
-	m_currentMatchingTimestamp(0.0f)
+	m_currentMatchingTimestamp(0.0f),
+	m_lastDueTimestamp(0)
 {
 	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
 	// off to improve performance if you don't need them.
@@ -210,7 +207,9 @@ void UEvercoastStreamingReaderComp::CreateReader()
 		m_audioComponent->SetActive(false);
 		m_audioComponent->bAutoDestroy = false;
 	}
-	m_reader = UGhostTreeFormatReader::Create(GetWorld()->WorldType == EWorldType::Editor, m_audioComponent, MaxCacheSizeInMB);
+
+	m_baseDecoderType = DT_Invalid;
+	m_reader = UGhostTreeFormatReader::Create(GetWorld()->WorldType == EWorldType::Editor, m_audioComponent, MaxCacheSizeInMB, this);
 	m_reader->SetInitialSeek(m_playbackInitSeek);
 	s_readerCompRegistry.insert(std::make_pair(m_reader->GetRawHandle(), this));
 	m_reader->SetStatusCallbackRaw(this);
@@ -240,8 +239,8 @@ void UEvercoastStreamingReaderComp::CreateReader()
 	{
 		UE_LOG(EvercoastReaderLog, Warning, TEXT("Asset is empty. No data will be decoded or rendered, nor the decoder will be created."));
 		m_dataDecoder = nullptr;
-		m_baseDecoder = nullptr;
-		m_auxDecoder = nullptr;
+		//m_baseDecoder = nullptr;
+		//m_auxDecoder = nullptr;
 
 		// No file opened, but still need to keep promise
 		m_fileOpenPromise = std::promise<void>();
@@ -252,32 +251,33 @@ void UEvercoastStreamingReaderComp::CreateReader()
 
 	if (ECVAsset->GetDataURL().EndsWith(".ecv"))
 	{
-		m_baseDecoder = EvercoastDecoder::Create();
+		//m_baseDecoder = EvercoastVoxelDecoder::Create();
+		m_baseDecoderType = DecoderType::DT_EvercoastVoxel;
 	}
 	else if (ECVAsset->GetDataURL().EndsWith(".ecm"))
 	{
-		m_baseDecoder = CortoDecoder::Create();
-		m_auxDecoder = WebpDecoder::Create();
+		m_baseDecoderType = DecoderType::DT_CortoMesh;
+		//m_baseDecoder = CortoDecoder::Create();
+		//m_auxDecoder = WebpDecoder::Create();
+	}
+	else if (ECVAsset->GetDataURL().EndsWith("ecz"))
+	{
+		m_baseDecoderType = DecoderType::DT_EvercoastSpz;
+		//m_baseDecoder = EvercoastGaussianSplatDecoder::Create();
 	}
 	else
 	{
 		m_dataDecoder = nullptr;
-		m_baseDecoder = nullptr;
-		m_auxDecoder = nullptr;
+		//m_baseDecoder = nullptr;
+		//m_auxDecoder = nullptr;
+		m_baseDecoderType = DecoderType::DT_Invalid;
 
 		UE_LOG(EvercoastReaderLog, Error, TEXT("Asset suffix is neither .ecv nor .ecm. Cannot choose a decoder."));
 		OnFatalError("Cannot Choose Decoder Error");
 		return;
 	}
 
-	if (bAsyncDataDecoding)
-	{
-		m_dataDecoder = std::make_shared<EvercoastAsyncStreamingDataDecoder>(m_baseDecoder, m_auxDecoder);
-	}
-	else
-	{
-		m_dataDecoder = std::make_shared<EvercoastBasicStreamingDataDecoder>(m_baseDecoder, m_auxDecoder);
-	}
+	m_dataDecoder = std::make_shared<EvercoastAsyncStreamingDataDecoder>(m_baseDecoderType);
 
 	m_fileOpenPromise = std::promise<void>();
 	m_fileOpenFuture = m_fileOpenPromise.get_future();
@@ -305,12 +305,14 @@ void UEvercoastStreamingReaderComp::ResetReader()
 	}
 
 	m_dataDecoder = nullptr;
-	m_baseDecoder = nullptr;
-	m_auxDecoder = nullptr;
+	//m_baseDecoder = nullptr;
+	//m_auxDecoder = nullptr;
+	m_baseDecoderType = DecoderType::DT_Invalid;
 	m_readerHasFatalError = false;
 	m_currentMatchingFrameNumber = 0;
 	m_currentMatchingTimestamp = 0.0f;
 	m_audioComponent = nullptr;
+	m_lastDueTimestamp = 0;
 
 }
 
@@ -350,7 +352,7 @@ void UEvercoastStreamingReaderComp::ToggleAuxPlaybackIfPossible(bool play)
 			if (soundWaveBase->IsA<URuntimeAudio>())
 			{
 				auto runtimeAudio = static_cast<URuntimeAudio*>(soundWaveBase);
-				runtimeAudio->SeekToTime(m_currReadTimestamp);
+				runtimeAudio->SeekToTime(GetPlaybackTiming());
 
 			}
 			else
@@ -381,12 +383,11 @@ void UEvercoastStreamingReaderComp::ToggleAuxPlaybackIfPossible(bool play)
 
 void UEvercoastStreamingReaderComp::ToggleVideoTextureHogIfPossible(bool play)
 {
-	if (m_videoTextureHog && m_baseDecoder && m_baseDecoder->GetType() == DT_CortoMesh)
+	if (m_videoTextureHog && m_baseDecoderType == DT_CortoMesh)
 	{
 		check(m_reader->MeshRequiresExternalData());
 		if (play)
 		{
-			m_videoTextureHog->ResetTo(m_currReadTimestamp - m_reader->GetFrameInterval()); // give one frame of clearance
 			m_videoTextureHog->StartHogging();
 		}
 		else {
@@ -427,8 +428,8 @@ void UEvercoastStreamingReaderComp::SetRendererActor(AEvercoastVolcapActor* InAc
 		if (Renderer)
 		{
 			// Make sure it has compatible sub renderer
-			if (m_baseDecoder)
-				Renderer->ChooseCorrespondingSubRenderer(m_baseDecoder->GetType());
+			if (m_baseDecoderType != DecoderType::DT_Invalid)
+				Renderer->ChooseCorrespondingSubRenderer(m_baseDecoderType);
 		}
 	}
 	else
@@ -462,7 +463,7 @@ void UEvercoastStreamingReaderComp::RecreateReaderSync()
 	ensureMsgf(m_fileOpenFuture.valid(), TEXT("Invalid IO future!"));
 	m_fileOpenFuture.get();
 
-	if (m_baseDecoder && m_baseDecoder->GetType() == DT_CortoMesh && m_videoTextureHog)
+	if (m_baseDecoderType == DT_CortoMesh && m_videoTextureHog)
 	{
 		check(m_reader && m_reader->MeshRequiresExternalData());
 	}
@@ -513,6 +514,7 @@ void UEvercoastStreamingReaderComp::OnInSeekingChanged(bool inSeeking)
 
 	if (m_timestampDriver)
 	{
+		/*
 		if (inSeeking)
 		{
 			m_timestampDriver->ResetTimerTo(m_reader->GetSeekingTarget(), m_playbackStatus == PlaybackStatus::Playing);
@@ -521,6 +523,8 @@ void UEvercoastStreamingReaderComp::OnInSeekingChanged(bool inSeeking)
 		{
 			m_timestampDriver->ResetTimerTo(m_reader->GetCurrentTimestamp(), m_playbackStatus == PlaybackStatus::Playing);
 		}
+		*/
+		m_timestampDriver->ResetTimerTo(m_reader->GetSeekingTarget(), m_playbackStatus == PlaybackStatus::Playing);
 	}
 
 	_PrintDebugStatus();
@@ -564,16 +568,6 @@ void UEvercoastStreamingReaderComp::OnWaitingForAudioDataChanged(bool isWaitingF
 
 void UEvercoastStreamingReaderComp::OnWaitingForVideoDataChanged(bool isWaitingForVideoData)
 {
-	m_isReaderWaitingForVideoData = isWaitingForVideoData;
-	if (m_playbackStatus == PlaybackStatus::Playing)
-	{
-		ToggleAuxPlaybackIfPossible(IsReaderPlayableWithoutBlocking());
-	}
-	else if (m_playbackStatus == PlaybackStatus::Paused)
-	{
-		ToggleVideoTextureHogIfPossible(IsReaderPlayableWithoutBlocking());
-	}
-	_PrintDebugStatus();
 }
 
 
@@ -582,7 +576,7 @@ bool UEvercoastStreamingReaderComp::IsStreamingDurationReliable() const
 	if (!m_reader)
 		return false;
 
-	if (m_baseDecoder && m_baseDecoder->GetType() == DT_CortoMesh && m_videoTextureHog)
+	if (m_baseDecoderType == DT_CortoMesh && m_videoTextureHog)
 	{
 		return m_videoTextureHog->IsVideoOpened();
 	}
@@ -592,7 +586,7 @@ bool UEvercoastStreamingReaderComp::IsStreamingDurationReliable() const
 
 void UEvercoastStreamingReaderComp::WaitForDurationBecomesReliable()
 {
-	if (m_baseDecoder && m_baseDecoder->GetType() == DT_CortoMesh && m_videoTextureHog)
+	if (m_baseDecoderType == DT_CortoMesh && m_videoTextureHog)
 	{
 		while (!m_videoTextureHog->IsVideoOpened())
 		{
@@ -605,13 +599,13 @@ void UEvercoastStreamingReaderComp::WaitForDurationBecomesReliable()
 
 bool UEvercoastStreamingReaderComp::IsReaderPlayableWithoutBlocking() const
 {
-	return m_isReaderPlaybackReady && !m_isReaderInSeeking && !m_isReaderWaitingForData && !m_isReaderWaitingForAudioData && !m_isReaderWaitingForVideoData;
+	return m_isReaderPlaybackReady && !m_isReaderInSeeking && !m_isReaderWaitingForData && !m_isReaderWaitingForAudioData;
 }
 
 void UEvercoastStreamingReaderComp::_PrintDebugStatus() const
 {
-	UE_LOG(EvercoastReaderLog, Verbose, TEXT("PlaybackReady: %d\tInSeeking: %d\tWaitingForData: %d\tWaitingForAudioData: %d\tWaitingForVideoData: %d"), 
-		m_isReaderPlaybackReady, m_isReaderInSeeking, m_isReaderWaitingForData, m_isReaderWaitingForAudioData, m_isReaderWaitingForVideoData);
+	UE_LOG(EvercoastReaderLog, Verbose, TEXT("PlaybackReady: %d\tInSeeking: %d\tWaitingForData: %d\tWaitingForAudioData: %d"), 
+		m_isReaderPlaybackReady, m_isReaderInSeeking, m_isReaderWaitingForData, m_isReaderWaitingForAudioData);
 
 }
 
@@ -660,17 +654,6 @@ void UEvercoastStreamingReaderComp::OnReaderEvent(ECReaderEvent event)
 
 void UEvercoastStreamingReaderComp::NotifyReceivedTimestamp(float timeStamp)
 {
-	m_currReadTimestamp = timeStamp;
-
-	if (m_syncStatus == SyncStatus::VideoFeedStarving ||
-		m_syncStatus == SyncStatus::InSync_SkippedFrames)
-	{
-		// when video player is starving for geom or video player has skipped frames,
-		// geometry data will be forced to skip. In this case, we need to synchronise 
-		// the playback timer to the geometry data timestamp. This will cause inaccurate
-		// timing but there's no better way of get around it
-        m_timestampDriver->ResetTimerTo(timeStamp, m_playbackStatus == PlaybackStatus::Playing);
-	}
 }
 
 void UEvercoastStreamingReaderComp::NotifyReceivedChannelsInfo()
@@ -687,7 +670,7 @@ void UEvercoastStreamingReaderComp::NotifyReceivedChannelsInfo()
 	// By the time ghost tree reader should already get the "corrected" clip duration
 	m_timestampDriver = MakeShared<FTimestampDriver, ESPMode::ThreadSafe>(m_reader->GetDuration());
 	
-	if (m_baseDecoder && m_baseDecoder->GetType() == DT_CortoMesh)
+	if (m_baseDecoderType == DT_CortoMesh)
 	{
 		check(m_reader->IsMeshData());
 
@@ -710,24 +693,16 @@ void UEvercoastStreamingReaderComp::NotifyReceivedChannelsInfo()
 
 			if (!m_videoTextureHog)
 			{
-				if (VideoCodecProvider == EVideoCodecProvider::BUILTIN)
-				{
-					FName name = MakeUniqueObjectName((UObject*)GetTransientPackage(), UElectraVideoTextureHog::StaticClass(), FName(this->GetName() + TEXT("_VideoTextureHog")));
-					m_videoTextureHog = NewObject<UElectraVideoTextureHog>((UObject*)GetTransientPackage(), name);
 
-					UE_LOG(EvercoastReaderLog, Log, TEXT("%s using built-in decoder."), *UGameplayStatics::GetPlatformName());
-				}
-				else
-				{
+				FName name = MakeUniqueObjectName((UObject*)GetTransientPackage(), UFFmpegVideoTextureHog::StaticClass(), FName(this->GetName() + TEXT("_VideoTextureHog")));
+				m_videoTextureHog = NewObject<UFFmpegVideoTextureHog>((UObject*)GetTransientPackage(), name);
 
-					FName name = MakeUniqueObjectName((UObject*)GetTransientPackage(), UFFmpegVideoTextureHog::StaticClass(), FName(this->GetName() + TEXT("_VideoTextureHog")));
-					m_videoTextureHog = NewObject<UFFmpegVideoTextureHog>((UObject*)GetTransientPackage(), name);
-
-					UE_LOG(EvercoastReaderLog, Log, TEXT("%s using ffmpeg decoder."), *UGameplayStatics::GetPlatformName());
-				}
+				UE_LOG(EvercoastReaderLog, Log, TEXT("%s using ffmpeg decoder."), *UGameplayStatics::GetPlatformName());
 			}
 
-			m_cortoTexSeekStage = CTS_DEFAULT;
+			//m_cortoTexSeekStage = CTS_DEFAULT;
+			m_gtSeekStage = GTS_DEFAULT;
+			m_vdSeekStage = VDS_DEFAULT;
 
 			if (ECVAsset->IsHttpStreaming())
 			{
@@ -771,12 +746,16 @@ void UEvercoastStreamingReaderComp::NotifyReceivedChannelsInfo()
 		else
 		{
 			UE_LOG(EvercoastReaderLog, Log, TEXT("No external data needed for %s"), *ECVAsset->GetDataURL());
-			m_cortoTexSeekStage = CTS_NA;
+			//m_cortoTexSeekStage = CTS_NA;
+			m_gtSeekStage = GTS_DEFAULT;
+			m_vdSeekStage = VDS_DEFAULT;
 		}
 	}
 	else
 	{
-		m_cortoTexSeekStage = CTS_NA;
+		//m_cortoTexSeekStage = CTS_NA;
+		m_gtSeekStage = GTS_DEFAULT;
+		m_vdSeekStage = VDS_DEFAULT;
 	}
 
 	if (m_reader->IsAudioDataAvailable())
@@ -801,15 +780,16 @@ bool UEvercoastStreamingReaderComp::OnOpenConnection(bool prerequisitySucceeded)
 
 	bool ret = true;
 
-	if (m_baseDecoder->GetType() == DT_CortoMesh ||
-		m_baseDecoder->GetType() == DT_EvercoastVoxel)
+	if (m_baseDecoderType == DT_CortoMesh ||
+		m_baseDecoderType == DT_EvercoastVoxel ||
+		m_baseDecoderType == DT_EvercoastSpz)
 	{
 		DoRefreshRenderer();
 
 	}
 	else
 	{
-		ensureMsgf(false, TEXT("Unknown decoder type: %d. Cannot create renderer."), (int)m_baseDecoder->GetType());
+		ensureMsgf(false, TEXT("Unknown decoder type: %d. Cannot create renderer."), (int)m_baseDecoderType);
 		// keep promise
 		m_fileOpenPromise.set_value();
 		ret = false;
@@ -820,16 +800,16 @@ bool UEvercoastStreamingReaderComp::OnOpenConnection(bool prerequisitySucceeded)
 
 void UEvercoastStreamingReaderComp::DoRefreshRenderer()
 {
-	if (!m_baseDecoder)
+	if (m_baseDecoderType == DT_Invalid)
 		return;
 
 	if (Renderer)
-		Renderer->ChooseCorrespondingSubRenderer(m_baseDecoder->GetType());
+		Renderer->ChooseCorrespondingSubRenderer(m_baseDecoderType);
 }
 
 bool UEvercoastStreamingReaderComp::OnCloseConnection(bool prerequisitySucceeded)
 {
-	if (m_baseDecoder->GetType() == DT_CortoMesh)
+	if (m_baseDecoderType == DT_CortoMesh)
 	{
 		if (m_videoTextureHog)
 		{
@@ -843,27 +823,331 @@ bool UEvercoastStreamingReaderComp::OnCloseConnection(bool prerequisitySucceeded
 	return true;
 }
 
-// Called every frame
-void UEvercoastStreamingReaderComp::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	constexpr float playbackStartTime = 0.0f; // should rewind to 0, the very beginning
-	bool shouldFreezeFirstFrame = (GetWorld()->WorldType == EWorldType::Editor);
+bool UEvercoastStreamingReaderComp::IsFrameCached(double testTimestamp) const
+{
+	if (m_dataDecoder)
+	{
+		if ((m_baseDecoderType == DT_EvercoastVoxel ||
+			m_baseDecoderType == DT_EvercoastSpz ) && Renderer)
+		{
+			auto result = m_dataDecoder->QueryResult(testTimestamp);
+			if (result && result->DecodeSuccessful)
+			{
+				return true;
+			}
+		}
+		else if (m_baseDecoderType == DT_CortoMesh)
+		{
+			// MESH + WEBP TEX
+			if (!m_reader->MeshRequiresExternalData())
+			{
+				auto result = m_dataDecoder->QueryResult(testTimestamp);
+				if (result && result->DecodeSuccessful)
+				{
+					return true;
+				}
+			}
+			else
+			{
+				auto result = m_dataDecoder->QueryResult(testTimestamp);
+				if (result && result->DecodeSuccessful)
+				{
+					std::shared_ptr<CortoWebpUnifiedDecodeResult> unifiedResult = std::static_pointer_cast<CortoWebpUnifiedDecodeResult>(result);
+					UTexture* decodedTexture = FindVideoTexture(unifiedResult->frameIndex);
+					if (decodedTexture)
+					{
+						return true;
+					}
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
+void UEvercoastStreamingReaderComp::TickSequencerPlayback(float clipDuration)
+{
+	constexpr float EPOCH_TIME = 0.0f; // should rewind to 0, the very beginning
 
 	bool isPlayingOrPause = (m_playbackStatus == PlaybackStatus::Playing) || (m_playbackStatus == PlaybackStatus::Paused);
-	bool isPlaying = m_playbackStatus == PlaybackStatus::Playing;
+	float dueTimestamp = GetPlaybackTiming();
+
+	bool loopInProgress = m_gtSeekStage != GTS_DEFAULT || m_vdSeekStage != VDS_DEFAULT;
+
+	// DEAL WITH LOOPING
+	bool videoHitEOF = false;
+	if (m_videoTextureHog && m_videoTextureHog->IsEndReached())
+		videoHitEOF = true;
+
+	bool rewindInTime = false;
+	if (dueTimestamp < m_lastDueTimestamp)
+	{
+		// We need this check because we want to keep the 1s cache for a short rewinding in sequencer
+		if (m_videoTextureHog && m_baseDecoderType== DT_CortoMesh)
+		{
+			auto meshResult = m_dataDecoder->QueryResult(dueTimestamp);
+			if (meshResult == nullptr ||
+				FindVideoTexture(meshResult->frameIndex) == nullptr)
+			{
+				// Can't find a cache, that means a big rewind, i.e. loop back to the beginning
+				rewindInTime = true;
+			}
+		}
+		else
+		{
+			if (m_dataDecoder->QueryResult(dueTimestamp) == nullptr)
+			{
+				rewindInTime = true;
+			}
+		}
+		
+	}
+		
+	
+	if (clipDuration > 0 && ((dueTimestamp + m_reader->GetFrameInterval() >= clipDuration) || loopInProgress || videoHitEOF || rewindInTime))
+	{
+		
+		dueTimestamp = EPOCH_TIME; // avoid false trimming
+
+		if (m_videoTextureHog && m_baseDecoderType == DT_CortoMesh)
+		{
+				
+			if (m_vdSeekStage == VDS_DEFAULT)
+			{
+				m_vdSeekStage = VDS_REQUESTED;
+
+				m_videoTextureHog->ResetTo(EPOCH_TIME, [this, EPOCH_TIME]() {
+					UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("VideoTextureHog Seek to %.2f completed"), EPOCH_TIME);
+					this->m_vdSeekStage = VDS_COMPLETED;
+					this->OnWaitingForVideoDataChanged(false); // force clean the wait for video flag
+
+					this->m_syncStatus = SyncStatus::InSync;
+					}
+				);
+			}
+
+			if (m_gtSeekStage == GTS_DEFAULT)
+			{
+				m_gtSeekStage = GTS_REQUESTED;
+				m_reader->RequestFrameOnTimestamp(EPOCH_TIME, [this, EPOCH_TIME]() {
+
+					UE_LOG(EvercoastReaderLog, Log, TEXT("GT Seek to %.2f completed"), EPOCH_TIME);
+					this->m_gtSeekStage = GTS_COMPLETED;
+
+					});
+			}
+
+
+		}
+		else
+		{
+			if (m_gtSeekStage == GTS_DEFAULT)
+			{
+				m_gtSeekStage = GTS_REQUESTED;
+				// check curr timestamp too so avoid repeatedly request seeking(==infinite seeking and heavy IO)...
+				m_reader->RequestFrameOnTimestamp(EPOCH_TIME, [this]() {
+					this->m_gtSeekStage = GTS_COMPLETED;
+					});
+			}
+
+		}
+
+
+		
+	}
+
+	if (loopInProgress)
+	{
+		bool seekFinished = false;
+
+		if (m_videoTextureHog && m_baseDecoderType == DT_CortoMesh)
+		{
+			if (m_vdSeekStage == VDS_COMPLETED && m_gtSeekStage == GTS_COMPLETED)
+			{
+				seekFinished = true;
+			}
+		}
+		else
+		{
+			if (m_gtSeekStage == GTS_COMPLETED)
+			{
+				seekFinished = true;
+			}
+		}
+
+		if (seekFinished)
+		{
+			// when the seeking is successful(almost)
+			if (IsReaderPlayableWithoutBlocking())
+			{
+				// flush the decoder's remaining result. This needs to be done
+				// for corto mesh/video decoder because the mismatch num of video frames
+				// and geo frames and can cause delays
+				m_syncStatus = SyncStatus::InSync; // reset sync status
+
+				// force reset timer
+				m_timestampDriver->ResetTimer();
+				// re-get timestamp
+				dueTimestamp = GetPlaybackTiming();
+
+				ToggleAuxPlaybackIfPossible(true);
+
+				m_vdSeekStage = VDS_DEFAULT;
+				m_gtSeekStage = GTS_DEFAULT;
+
+				loopInProgress = false;
+
+			}
+		}
+	}
+
+	m_lastDueTimestamp = dueTimestamp;
+
+	if (loopInProgress)
+		return;
+
+	
+
+	if (m_dataDecoder)
+	{
+		if ((m_baseDecoderType == DT_EvercoastVoxel || m_baseDecoderType == DT_EvercoastSpz) && Renderer)
+		{
+			std::vector<std::shared_ptr<IEvercoastStreamingDataUploader>> uploaders = Renderer->GetDataUploaders();
+			if (!uploaders.empty())
+			{
+				auto result = m_dataDecoder->QueryResult(dueTimestamp);
+				if (result && result->DecodeSuccessful)
+				{
+					// Uploader to check for voxel frame duplication
+					for (auto uploader : uploaders)
+					{
+						uploader->Upload(result.get());
+					}
+					m_currentMatchingFrameNumber = result->frameIndex;
+					m_currentMatchingTimestamp = result->frameTimestamp;
+					m_syncStatus = SyncStatus::InSync;
+				}
+				else
+				{
+					m_syncStatus = SyncStatus::WaitForGT;
+				}
+			}
+		}
+		else if (m_baseDecoderType == DT_CortoMesh)
+		{
+			// MESH + WEBP TEX
+			if (!m_reader->MeshRequiresExternalData())
+			{
+				auto result = m_dataDecoder->QueryResult(dueTimestamp);
+				if (result && result->DecodeSuccessful)
+				{
+					check(result->GetType() == DRT_CortoMesh_WebpImage_Unified);
+
+					std::vector<std::shared_ptr<IEvercoastStreamingDataUploader>> uploaders = Renderer->GetDataUploaders();
+					if (!uploaders.empty())
+					{
+						std::shared_ptr<CortoWebpUnifiedDecodeResult> unifiedResult = std::static_pointer_cast<CortoWebpUnifiedDecodeResult>(result);
+
+						auto meshResult = unifiedResult->meshResult;
+						auto imgResult = unifiedResult->imgResult;
+						check(meshResult->DecodeSuccessful && imgResult->DecodeSuccessful && meshResult->frameIndex == imgResult->frameIndex);
+						check(meshResult->GetType() == DRT_CortoMesh && imgResult->GetType() == DRT_WebpImage);
+
+						// Uploader to check for mesh frame duplication
+						for (auto uploader : uploaders)
+						{
+							uploader->Upload(unifiedResult.get());
+						}
+
+						m_currentMatchingFrameNumber = unifiedResult->frameIndex;
+						m_currentMatchingTimestamp = unifiedResult->frameTimestamp;
+						m_syncStatus = SyncStatus::InSync;
+					}
+				}
+				else
+				{
+					m_syncStatus = SyncStatus::WaitForGT;
+				}
+			}
+			// MESH + VIDEO TEX
+			else
+			{
+				auto result = m_dataDecoder->QueryResult(dueTimestamp);
+				if (result && result->DecodeSuccessful)
+				{
+					check(result->GetType() == DRT_CortoMesh_WebpImage_Unified);
+
+					std::vector<std::shared_ptr<IEvercoastStreamingDataUploader>> uploaders = Renderer->GetDataUploaders();
+					if (!uploaders.empty())
+					{
+						std::shared_ptr<CortoWebpUnifiedDecodeResult> unifiedResult = std::static_pointer_cast<CortoWebpUnifiedDecodeResult>(result);
+						UTexture* decodedTexture = FindVideoTexture(unifiedResult->frameIndex);
+						if (decodedTexture)
+						{
+							// HACKHACK: hitchhike the payload
+							unifiedResult->videoTextureResult = decodedTexture;
+
+							// Uploader to check for mesh frame duplication
+							for (auto uploader : uploaders)
+							{
+								uploader->Upload(unifiedResult.get());
+							}
+
+							m_currentMatchingFrameNumber = unifiedResult->frameIndex;
+							m_currentMatchingTimestamp = unifiedResult->frameTimestamp;
+							m_syncStatus = SyncStatus::InSync;
+
+							UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("Geom/Tex result matched: %.2f Coerced To: %.2f "), dueTimestamp, m_currentMatchingTimestamp);
+						}
+						else
+						{
+							m_syncStatus = SyncStatus::WaitForVideo;
+
+							UE_LOG(EvercoastReaderLog, Log, TEXT("Tex result not found: %.2f"), dueTimestamp);
+						}
+
+
+					}
+				}
+				else
+				{
+					UE_LOG(EvercoastReaderLog, Log, TEXT("Geom result not found: %.2f"), dueTimestamp);
+
+					m_syncStatus = SyncStatus::WaitForGT;
+				}
+
+				// To move video decoder's cache forward
+				TrimVideoCache(dueTimestamp);
+			}
+		}
+		else
+		{
+			// Do nothing, no data should be held in any base decoder
+		}
+
+		// To move data decoder's cache forward
+		if (m_dataDecoder->TrimCache(dueTimestamp))
+		{
+			// after trimming, we'll need to call to request reading API's next frame (RequestFrameNext)
+			m_reader->ContinueRequest();
+		}
+
+	}
+}
+
+void UEvercoastStreamingReaderComp::TickNormalPlayback(float clipDuration)
+{
+	constexpr float EPOCH_TIME = 0.0f; // should rewind to 0, the very beginning
+
+	bool isPlayingOrPause = (m_playbackStatus == PlaybackStatus::Playing) || (m_playbackStatus == PlaybackStatus::Paused);
 
 	float dueTimestamp = GetPlaybackTiming();
 	bool scrutinizeTime = false;
-
-	bool needDataUploading = true;
+	bool isPlaying = m_playbackStatus == PlaybackStatus::Playing;
 
 	if (m_audioComponent && m_audioComponent->Sound && m_audioComponent->Sound->IsA<URuntimeAudio>())
-	{
-		scrutinizeTime = true;
-	}
-	else if (m_timestampDriver && m_timestampDriver->IsSequencerOverriding())
 	{
 		scrutinizeTime = true;
 	}
@@ -874,164 +1158,101 @@ void UEvercoastStreamingReaderComp::TickComponent(float DeltaTime, ELevelTick Ti
 	// Override scrutinizeTime
 	if (bSlackTiming)
 		scrutinizeTime = false;
+
+	bool loopInProgress = m_gtSeekStage != GTS_DEFAULT || m_vdSeekStage != VDS_DEFAULT;
 	//////////////////////////////////////////////////////////////
 	// Delta time calculation, micro time management and looping
-	if (m_dataDecoder && m_baseDecoder
+	if (m_dataDecoder
 		&& isPlayingOrPause
-		&& m_currReadTimestamp >= 0
 		&& !m_reader->IsInSeeking()
 		)
 	{
-		// Still need to deal with the special case for geometry feed starving
-		if (m_videoTextureHog && m_syncStatus == SyncStatus::GeomFeedStarving
-			&& !scrutinizeTime)
-		{
-			check(m_reader->MeshRequiresExternalData());
-			// Do not advance timestamp unless video player has reached the end.
-			if (!m_videoTextureHog->IsEndReached())
-			{
-				dueTimestamp = m_geomFeedStarvingStartTime;
-			}
-			else
-			{
-				// If the video has reached the end, that means there won't be 
-				// any valid video frame coming out(video texture hog doesn't automatically loop), we do 
-				// want to advance the timestamp so that the playback will hit the end then loop to the start.
-				// This is not ideal but since some videos has large keyframe gaps, it happens when video
-				// seek to a point close enough to the last keyframe, and the seeking algorithm does pin
-				// the seeking to that last keyframe, it will 'drag' the playback there and soon will reach
-				// the end.
-			}
-		}
-		
-		// In the middle of looping(only cares when ECM with external video), keep the dueTimestamp zero
-		bool loopInProgress = m_cortoTexSeekStage == CTS_REQUESTED || m_cortoTexSeekStage == CTS_COMPLETED;
-		if (loopInProgress)
-		{
-			dueTimestamp = playbackStartTime;
-		}
-		else // Do not request more frames if in the middle of looping, otherwise will increase the discrepency of timestamp of mesh/texture
-		{
+		// DEAL WITH DURATION INCONSISTENCY BETWEEN GT AND VIDEO
+		float duration = clipDuration;
+		UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("Due time: %.3f, playback timer: %.3f, duration: %.3f"), dueTimestamp, GetPlaybackTiming(), duration);
 
-			if (dueTimestamp - m_currReadTimestamp >= m_reader->GetFrameInterval())
-			{
-				if (!shouldFreezeFirstFrame || m_timestampDriver->IsSequencerOverriding())
-				{
-					m_reader->RequestFrameNext();
-				}
-			}
-		}
-
-		float duration;
-		if (m_videoTextureHog && m_videoTextureHog->IsVideoOpened() && m_baseDecoder->GetType() == DT_CortoMesh)
-		{
-			check(m_reader->MeshRequiresExternalData());
-			duration = std::min(m_reader->GetDuration(), m_videoTextureHog->GetVideoDuration());
-
-			// also check the timestamp driver, esp when geometry duration mismatch with video duration
-			// This normally should be done in NotifyChannelInfo() however due to streaming assets' async requirements
-			// it has to be done here for a non-blocking experience
-
-			if (duration > 0 && m_timestampDriver->GetVideoDuration() > duration)
-			{
-				// force changing video duration as we found a better one
-				m_timestampDriver->ForceChangeVideoDuration(duration);
-			}
-
-		}
-		else
-		{
-			duration = m_reader->GetDuration();
-		}
-
-		UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("Due time: %.3f, Read time: %.3f, playback timer: %.3f, duration: %.3f geom feed starving time: %.3f"), dueTimestamp, m_currReadTimestamp, GetPlaybackTiming(), duration, m_geomFeedStarvingStartTime);
-
+		// DEAL WITH LOOPING
 		bool videoHitEOF = false;
 		if (m_videoTextureHog && m_videoTextureHog->IsEndReached())
 			videoHitEOF = true;
 
-		bool isInSequencer = (m_timestampDriver && m_timestampDriver->IsSequencerOverriding());
-
-		if ((bLoop || isInSequencer) && duration > 0 && ((dueTimestamp >= duration) || loopInProgress || videoHitEOF))
+		if (bLoop && duration > 0 && ((dueTimestamp + m_reader->GetFrameInterval() >= duration) || loopInProgress || videoHitEOF))
 		{
-			
-			constexpr float seekingTargetDiffThreshold = 1.0f / 10.0f;
-			float timeDiff = FMath::Abs(m_reader->GetCurrentTimestamp() - playbackStartTime);
-			bool currTimestampCloseEnough = timeDiff < seekingTargetDiffThreshold;
+			bool seekFinished = false;
 
-			if (!currTimestampCloseEnough)
+			if (m_videoTextureHog && m_baseDecoderType == DT_CortoMesh)
 			{
-				if (m_videoTextureHog && m_baseDecoder->GetType() == DT_CortoMesh)
+				if (m_vdSeekStage == VDS_DEFAULT)
 				{
-					// The reason we want to do media player seeking first, is on Android the seeking process is slow and will lag
-					// till the mesh buffer is full. This will create a forever mismatch of mesh-texture pair. So here we force to
-					// seek media player first.
-					if (m_cortoTexSeekStage == CTS_DEFAULT)
-					{
-						// initiate media player seeking request
-						m_cortoTexSeekStage = CTS_REQUESTED;
-						// reset sync status
-						m_syncStatus = SyncStatus::InSync;
+					m_vdSeekStage = VDS_REQUESTED;
 
-						m_videoTextureHog->ResetTo(playbackStartTime, [self=this, playbackStartTime]() {
-								UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("VideoTextureHog Seek to %.2f completed"), playbackStartTime);
-								self->m_cortoTexSeekStage = CTS_COMPLETED; 
-								self->OnWaitingForVideoDataChanged(false); // force clean the wait for video flag
-							}
-						);
-					}
-					else if (m_cortoTexSeekStage == CTS_COMPLETED)
-					{
+					m_videoTextureHog->ResetTo(EPOCH_TIME, [this, EPOCH_TIME]() {
+						UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("VideoTextureHog Seek to %.2f completed"), EPOCH_TIME);
+						this->m_vdSeekStage = VDS_COMPLETED;
+						this->OnWaitingForVideoDataChanged(false); // force clean the wait for video flag
 
-						if (!(m_reader->GetSeekingTarget() == playbackStartTime && m_reader->IsInSeeking()))
-						{
-							// check curr timestamp too so avoid repeatedly request seeking(==infinite seeking and heavy IO)...
-							m_reader->RequestFrameOnTimestamp(playbackStartTime);
+						this->m_syncStatus = SyncStatus::InSync;
 						}
-
-						m_cortoTexSeekStage = CTS_DEFAULT;
-					}
+					);
 				}
-				else
+
+				if (m_gtSeekStage == GTS_DEFAULT)
 				{
-					if (!(m_reader->GetSeekingTarget() == playbackStartTime && m_reader->IsInSeeking()))
-					{
-						// check curr timestamp too so avoid repeatedly request seeking(==infinite seeking and heavy IO)...
-						m_reader->RequestFrameOnTimestamp(playbackStartTime);
-					}
+					m_gtSeekStage = GTS_REQUESTED;
+					m_reader->RequestFrameOnTimestamp(EPOCH_TIME, [this, EPOCH_TIME]() {
+
+						UE_LOG(EvercoastReaderLog, Log, TEXT("GT Seek to %.2f completed"), EPOCH_TIME);
+						this->m_gtSeekStage = GTS_COMPLETED;
+
+						});
+				}
+
+				if (m_vdSeekStage == VDS_COMPLETED && m_gtSeekStage == GTS_COMPLETED)
+				{
+					seekFinished = true;
+				}
+			}
+			else
+			{
+				if (m_gtSeekStage == GTS_DEFAULT)
+				{
+					m_gtSeekStage = GTS_REQUESTED;
+					// check curr timestamp too so avoid repeatedly request seeking(==infinite seeking and heavy IO)...
+					m_reader->RequestFrameOnTimestamp(EPOCH_TIME, [this]() {
+						this->m_gtSeekStage = GTS_COMPLETED;
+						});
+				}
+
+				if (m_gtSeekStage == GTS_COMPLETED)
+				{
+					seekFinished = true;
 				}
 			}
 
+			
 
-			if (currTimestampCloseEnough)
+			if (seekFinished)
 			{
 				// when the seeking is successful(almost)
 				if (IsReaderPlayableWithoutBlocking())
 				{
-					// force audio to rewind to playbackStartTime
-					m_currReadTimestamp = playbackStartTime;
-					// flush the decoder's remaining result. This needs to be done
-					// for corto mesh/video decoder because the mismatch num of video frames
-					// and geo frames and can cause delays
-					if (m_baseDecoder->GetType() == DT_CortoMesh)
-					{
-						m_dataDecoder->FlushAndDisposeResults();
-						m_syncStatus = SyncStatus::InSync; // reset sync status
-					}
+					m_syncStatus = SyncStatus::InSync; // reset sync status
 
-					// Mark loop for any driver that needs it
-					m_timestampDriver->MarkLoop();
 					// force reset timer
 					m_timestampDriver->ResetTimer();
+					// re-get timestamp
+					dueTimestamp = GetPlaybackTiming();
 
 					ToggleAuxPlaybackIfPossible(true);
 
-					
+					m_vdSeekStage = VDS_DEFAULT;
+					m_gtSeekStage = GTS_DEFAULT;
 				}
 			}
-			
-			// when we loop back to the beginning, we don't want to meddling with geometry/mesh sync status
-			needDataUploading = false;
+
+			// Update loopInProgress
+			loopInProgress = m_gtSeekStage != GTS_DEFAULT || m_vdSeekStage != VDS_DEFAULT;
+
 		}
 	}
 	//////////////////////////////////////////
@@ -1053,267 +1274,209 @@ void UEvercoastStreamingReaderComp::TickComponent(float DeltaTime, ELevelTick Ti
 	}
 	//////////////////////////////////////////
 
+	if (loopInProgress)
+		return;
 
 	/////////////////////////////////////////
 	// Data uploading
-	if (m_dataDecoder && needDataUploading)
+	if (m_dataDecoder)
 	{
-		
-		if (m_baseDecoder->GetType() == DT_EvercoastVoxel)
+		float trimmingMedian = -1;
+
+		// VOXEL & Splats, QUERY AND UPLOAD, STRAIGHTFORWARD 
+		if (m_baseDecoderType == DT_EvercoastVoxel ||
+			m_baseDecoderType == DT_EvercoastSpz )
 		{
 			if (Renderer)
 			{
-				auto uploader = Renderer->GetDataUploader();
-				if (uploader)
+				std::vector<std::shared_ptr<IEvercoastStreamingDataUploader>> uploaders = Renderer->GetDataUploaders();
+				float lastQueriedTimestamp = m_currentMatchingTimestamp;
+				auto result = m_dataDecoder->QueryResult(dueTimestamp);
+
+				if (!uploaders.empty() && result && result->DecodeSuccessful)
 				{
-					auto result = m_dataDecoder->PopResult();
-					uploader->Upload(result.get());
+					if (!scrutinizeTime)
+					{
+						auto nextFrameResult = m_dataDecoder->QueryResultAfterTimestamp(lastQueriedTimestamp);
+
+						// Check here if we have a more "adjacent" frame to upload
+						if (nextFrameResult && nextFrameResult->DecodeSuccessful && nextFrameResult->frameTimestamp < result->frameTimestamp)
+						{
+							// use next frame, as we don't want to skip frames
+							result = nextFrameResult;
+							trimmingMedian = nextFrameResult->frameTimestamp;
+						}
+					}
 
 					if (result && result->DecodeSuccessful)
 					{
+						if (m_syncStatus == SyncStatus::WaitForGT)
+						{
+							// Come back from pause-to-cache
+							m_syncStatus = SyncStatus::InSync;
+
+							OnWaitingForDataChanged(false);
+						}
+
+						// Uploader should check for frame duplication
+						for (auto uploader : uploaders)
+						{
+							uploader->Upload(result.get());
+						}
 						m_currentMatchingFrameNumber = result->frameIndex;
 						m_currentMatchingTimestamp = result->frameTimestamp;
 					}
+					else
+					{
+						// Wait
+						if (m_dataDecoder->IsTimestampBeyondCache(dueTimestamp))
+						{
+							OnWaitingForDataChanged(true);
 
-					// manually release the result from decoder
-					m_dataDecoder->DisposeResult(std::move(result));
+							m_syncStatus = SyncStatus::WaitForGT;
+						}
+					}
+				}
+				else
+				{
+					// Wait
+					if (m_dataDecoder->IsTimestampBeyondCache(dueTimestamp))
+					{
+						OnWaitingForDataChanged(true);
+
+						m_syncStatus = SyncStatus::WaitForGT;
+					}
 				}
 			}
 		}
-		else if (m_baseDecoder->GetType() == DT_CortoMesh)
+		// MESH + VIDEO OR MESH + WEBP
+		else if (m_baseDecoderType == DT_CortoMesh)
 		{
 			if (Renderer)
 			{
-				auto uploader = Renderer->GetDataUploader();
-				auto result = m_dataDecoder->PeekResult();
-				if (uploader && result->DecodeSuccessful)
+				std::vector<std::shared_ptr<IEvercoastStreamingDataUploader>> uploaders = Renderer->GetDataUploaders();
+				auto result = m_dataDecoder->QueryResult(dueTimestamp);
+
+				if (!uploaders.empty() && result && result->DecodeSuccessful)
 				{
+					float lastQueriedTimestamp = m_currentMatchingTimestamp;
+
+					// MESH + VIDEO TEXTURE IS COMPLEX
 					// When external video data is required
 					if (m_reader->MeshRequiresExternalData())
 					{
-						if (scrutinizeTime)
+						if (!scrutinizeTime)
 						{
-							float duration = StreamingGetDuration();
-							// find the closest candidate, this will improve the time matching of final rendered pictures, but will 
-							// drastically reduce the chance finding a pair of matching geom/video frame
-							auto nextResult = m_dataDecoder->PeekResult(1);
-							do
-							{
-								result = m_dataDecoder->PeekResult();
-								float timeDiff1 = std::max(0.0, dueTimestamp - result->frameTimestamp);
-								nextResult = m_dataDecoder->PeekResult(1);
-								float timeDiff2 = std::max(0.0, dueTimestamp - nextResult->frameTimestamp);
-								bool isTimeDiff2LargeNegative = dueTimestamp - nextResult->frameTimestamp < -0.5f * duration; // rule out the looping condition
-								if (result->DecodeSuccessful && nextResult->DecodeSuccessful && timeDiff2 < timeDiff1 && !isTimeDiff2LargeNegative)
-								{
-									// then that's a better candidate
+							auto nextFrameResult = m_dataDecoder->QueryResultAfterTimestamp(lastQueriedTimestamp);
 
-									// dispose the top result, 
-									m_dataDecoder->DisposeResult(m_dataDecoder->PopResult());
-									// try comparing the next result<->next next result
-								}
-								else
-								{
-									break;
-								}
-							} while (true);
+							// Check here if we have a more "adjacent" frame to upload
+							if (nextFrameResult && nextFrameResult->DecodeSuccessful && nextFrameResult->frameTimestamp < result->frameTimestamp)
+							{
+								// use next frame, as we don't want to skip frames
+								result = nextFrameResult;
+								trimmingMedian = nextFrameResult->frameTimestamp;
+							}
 						}
 
-						if (result->DecodeSuccessful)
+						// this should be true most of the time, but it can be false when threaded decoding
+						// changes the internal status of the decoder, during the two peeks. Chances are slim tho
+						if (result && result->DecodeSuccessful)
 						{
-							float diff = dueTimestamp - result->frameTimestamp;
-							UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("Time diff: %.3f at frame: %lld"), diff, result->frameIndex);
-
-							// this should be true most of the time, but it can be false when threaded decoding
-							// changes the internal status of the decoder, during the two peeks. Chances are slim tho
-
 							
+
+							if (m_syncStatus == SyncStatus::WaitForGT)
+							{
+								// Come back from pause-to-cache
+								m_syncStatus = SyncStatus::InSync;
+
+								OnWaitingForDataChanged(false);
+							}
+
 							check(result->GetType() == DRT_CortoMesh_WebpImage_Unified);
 							auto pResult = std::static_pointer_cast<CortoWebpUnifiedDecodeResult>(result);
 
 							UTexture* decodedTexture = FindVideoTexture(pResult->frameIndex);
+							// EVERYTHING GOES NORMAL
 							if (decodedTexture)
 							{
 								UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("Decoded uploaded at frame: %d, timestamp: %.3f, dueTime: %.3f"), pResult->frameIndex, pResult->frameTimestamp, dueTimestamp);
 
-								m_syncStatus = SyncStatus::InSync;
+
+								// hitchhike the payload
+								pResult->videoTextureResult = decodedTexture;
+								// Uploader and decoder will have to properly handle the lock/unlock of the decoded result,
+								// as the results are all preallocated and cached and reusable.
+								for (auto uploader : uploaders)
+								{
+									uploader->Upload(pResult.get());
+								}
+
+								if (m_syncStatus == SyncStatus::WaitForVideo)
+								{
+									// Come back from pause-to-cache
+									m_syncStatus = SyncStatus::InSync;
+
+									OnWaitingForDataChanged(false);
+								}
 
 								m_currentMatchingFrameNumber = pResult->frameIndex;
 								m_currentMatchingTimestamp = pResult->frameTimestamp;
 
-								//hitchhike the payload
-								pResult->videoTextureResult = decodedTexture;
-								m_dataDecoder->PopResult();
-								// Uploader and decoder will have to properly handle the lock/unlock of the decoded result,
-								// as the results are all preallocated and cached and reusable.
-
-								uploader->Upload(pResult.get());
-								m_dataDecoder->DisposeResult(std::move(result));
-								InvalidateVideoTexture(decodedTexture);
-
-								// Guard before we call OnWaitingForVideoDataChanged otherwise audio keeps seeking
-								if (m_isReaderWaitingForVideoData)
-									OnWaitingForVideoDataChanged(false);
-
-								// Try to keep the timing difference as a minimum
-								if (scrutinizeTime && diff > 0.2f)
-								{
-									m_reader->RequestFrameNext();
-								}
 							}
+							// VIDEO FRAME MISSING, STOP THE TIMER AND MARK WAIT
 							else
 							{
-								if (m_lastMismatchedFrame != pResult->frameIndex)
+
+								if (IsTimestampBeyondVideoCache(dueTimestamp))
 								{
-									UE_LOG(EvercoastReaderLog, Warning, TEXT("Cannot find video texture at frame: %d"), pResult->frameIndex);
-
-									if (m_lastMismatchedFrame + 1 == pResult->frameIndex)
-									{
-										m_consecutiveMismatchedFrameCount++;
-									}
-									else
-									{
-										m_consecutiveMismatchedFrameCount = 0;
-									}
-									m_lastMismatchedFrame = pResult->frameIndex;
-								}
-
-								// Check if the requested index falls within the video texture hog's cache.
-								// If it is not, then just wait a few more frames to allow the hog to catch up.
-								// If it is, then that means the hog failed to grab the frame, due to video decoder's 
-								// jumping frames, so we should just give up this request
-
-								int64_t mismatchedFrame = pResult->frameIndex;
-								bool withinRange = IsVideoFrameWithinHogCache(mismatchedFrame);
-								if (withinRange)
-								{
-									if (m_syncStatus != SyncStatus::InSync_SkippedFrames)
-										UE_LOG(EvercoastReaderLog, Log, TEXT("Video player skipped the frame. Skipping the mesh frame altogether."));
-
-									m_syncStatus = SyncStatus::InSync_SkippedFrames;
-									OnWaitingForVideoDataChanged(true);
-
-									m_dataDecoder->PopResult();
-									m_dataDecoder->DisposeResult(std::move(result));
-
-									// request next geom frame till we find a matching one
-									m_reader->RequestFrameNext();
-
-									// since we give up we should free up the video hog's slots that is before requested index and restart hogging again, if needed
-									InvalidateVideoTextureBeforeFrameIndex(mismatchedFrame);
+									m_syncStatus = SyncStatus::WaitForVideo;
+									OnWaitingForDataChanged(true);
 								}
 								else
 								{
-									// if the video frame hasn't catch up, then we'll just wait wait wait
-									bool beyondRange = IsVideoFrameBeyondHogCache(mismatchedFrame);
-									if (beyondRange)
-									{
-										// Check if video texture hog is full. 
-										// Full hog will never cache more frames no matter how long we wait. Reset the hog and wait again.
-										if (IsVideoTextureHogFull())
-										{
-											UE_LOG(EvercoastReaderLog, Warning, TEXT("Video player cache is full. Invalidate all already hogged frames then wait."));
-											m_videoTextureHog->InvalidateAllTextures();
-										}
-										else
-										{
-											// do nothing
-											if (m_syncStatus != SyncStatus::GeomFeedStarving)
-												UE_LOG(EvercoastReaderLog, Log, TEXT("Video player didn't catch up. Just need to wait"));
-
-											if (scrutinizeTime)
-											{
-												// maybe hopping a few milliseconds every 5 missing frames, sometimes the video player never catches up..
-												// This jump interval is arbitrary now, ideally it should be the length of keyframe interval
-												if (m_consecutiveMismatchedFrameCount >= 5)
-												{
-													UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("Jump forward 0.5s to catch up"));
-													m_videoTextureHog->JumpBy(0.5f);
-													m_consecutiveMismatchedFrameCount = 0;
-												}
-											}
-											// when doing scrubbing, it's likely texture hog is not full but it stopped hogging due to becoming full before scrubbing
-											if (!m_videoTextureHog->IsHogging() && m_videoTextureHog->IsHoggingPausedDueToFull() && m_videoTextureHog->IsFrameIndexWithinDuration(mismatchedFrame))
-											{
-												bool restartedHogging = m_videoTextureHog->StartHogging();
-												UE_LOG(EvercoastReaderLog, Warning, TEXT("Video player hogging restarted result: %d"), restartedHogging);
-											}
-										}
-
-										if (m_syncStatus != SyncStatus::GeomFeedStarving)
-										{
-											m_syncStatus = SyncStatus::GeomFeedStarving;
-											m_geomFeedStarvingStartTime = m_timestampDriver->GetElapsedTime();
-											// Geom is waiting for video frames
-											OnWaitingForVideoDataChanged(true);
-										}
-									}
-									else
-									{
-										bool beforeRange = IsVideoFrameBeforeHogCache(mismatchedFrame);
-										if (beforeRange)
-										{
-											// if the cached video frame already passed what's requested, we should just give up this request
-											// and at the same time, fast-forward geom feed by keep requesting next frame
-
-											if (m_syncStatus != SyncStatus::VideoFeedStarving)
-												UE_LOG(EvercoastReaderLog, Log, TEXT("Video player starving. Skipping the mesh frame ASAP."));
-
-											if (scrutinizeTime)
-											{
-												// maybe hopping a few milliseconds every 5 missing frames, sometimes the video player never catches up..
-												// This jump interval is arbitrary now, ideally it should be the length of keyframe interval
-												if (m_consecutiveMismatchedFrameCount >= 5)
-												{
-													UE_LOG(EvercoastReaderLog, VeryVerbose, TEXT("Jump backwards 0.5s to catch up"));
-													m_videoTextureHog->JumpBy(-0.5f);
-													m_consecutiveMismatchedFrameCount = 0;
-												}
-											}
-
-											m_syncStatus = SyncStatus::VideoFeedStarving;
-
-											m_dataDecoder->PopResult();
-											m_dataDecoder->DisposeResult(std::move(result));
-
-											// request next geom frame till we find a matching one
-											m_reader->RequestFrameNext();
-										}
-										else
-										{
-											// neither before or beyond, or within range, that means the video buffer is empty/all invalid, need to wait
-											if (m_syncStatus != SyncStatus::GeomFeedStarving)
-												UE_LOG(EvercoastReaderLog, Log, TEXT("Video player's cache is empty. Need to wait"));
-
-											// when doing scrubbing, it's likely texture hog is not full but it stopped hogging due to becoming full before scrubbing
-											if (!m_videoTextureHog->IsHogging() && m_videoTextureHog->IsHoggingPausedDueToFull() && m_videoTextureHog->IsFrameIndexWithinDuration(mismatchedFrame))
-											{
-												bool restartedHogging = m_videoTextureHog->StartHogging();
-												UE_LOG(EvercoastReaderLog, Warning, TEXT("Video player hogging restarted result: %d"), restartedHogging);
-											}
-
-											if (m_syncStatus != SyncStatus::GeomFeedStarving)
-											{
-												m_syncStatus = SyncStatus::GeomFeedStarving;
-												m_geomFeedStarvingStartTime = m_timestampDriver->GetElapsedTime();
-												// Geom is waiting for video frames
-												OnWaitingForVideoDataChanged(true);
-											}
-										}
-									}
+									// Do nothing just let timer run
 								}
+
+								
 							}
 						}
-						else
+
+						// Trim video cache
+						float videoMedianTimestamp = dueTimestamp;
+						if (trimmingMedian >= 0)
 						{
-							UE_LOG(EvercoastReaderLog, Warning, TEXT("Filtering candidates caused unsuccessful result. Decoder changed status during the calls? Frame: %lld, Time: %.3f"), result->frameIndex, dueTimestamp);
+							videoMedianTimestamp = trimmingMedian;
 						}
+						TrimVideoCache(videoMedianTimestamp);
 					}
 					else
 					{
-						// Texture data from ghosttree container
+						// MESH + WEBP TEXTURE, QUERY AND UPLOAD
 						check(result->GetType() == DRT_CortoMesh_WebpImage_Unified)
+
+						if (!scrutinizeTime)
 						{
+							auto nextFrameResult = m_dataDecoder->QueryResultAfterTimestamp(lastQueriedTimestamp);
+
+							// Check here if we have a more "adjacent" frame to upload
+							if (nextFrameResult && nextFrameResult->DecodeSuccessful && nextFrameResult->frameTimestamp < result->frameTimestamp)
+							{
+								// use next frame, as we don't want to skip frames
+								result = nextFrameResult;
+								trimmingMedian = nextFrameResult->frameTimestamp;
+							}
+						}
+
+						if (result && result->DecodeSuccessful)
+						{
+							if (m_syncStatus == SyncStatus::WaitForGT)
+							{
+								// Come back from pause-to-cache
+								m_syncStatus = SyncStatus::InSync;
+
+								OnWaitingForDataChanged(false);
+							}
+
 							std::shared_ptr<CortoWebpUnifiedDecodeResult> unifiedResult = std::static_pointer_cast<CortoWebpUnifiedDecodeResult>(result);
 
 							auto meshResult = unifiedResult->meshResult;
@@ -1321,32 +1484,124 @@ void UEvercoastStreamingReaderComp::TickComponent(float DeltaTime, ELevelTick Ti
 							check(meshResult->DecodeSuccessful && imgResult->DecodeSuccessful && meshResult->frameIndex == imgResult->frameIndex);
 							check(meshResult->GetType() == DRT_CortoMesh && imgResult->GetType() == DRT_WebpImage);
 
-							uploader->Upload(unifiedResult.get());
-
-							m_dataDecoder->DisposeResult(m_dataDecoder->PopResult());
+							for (auto uploader : uploaders)
+							{
+								uploader->Upload(unifiedResult.get());
+							}
 
 							m_currentMatchingFrameNumber = unifiedResult->frameIndex;
 							m_currentMatchingTimestamp = unifiedResult->frameTimestamp;
 						}
-						
+						else
+						{
+							// Wait
+							if (m_dataDecoder->IsTimestampBeyondCache(dueTimestamp))
+							{
+								OnWaitingForDataChanged(true);
+
+								m_syncStatus = SyncStatus::WaitForGT;
+							}
+						}
+
 					}
 				}
 				else
 				{
-					// UE_LOG(EvercoastReaderLog, Warning, TEXT("Data uploader null or decode unsuccessful. Time: %.3f"), m_dueTimestamp);
+					// if we cannot get a result here, which is very likely in http streaming, we'll need to 
+					// 1. tell why we cannot get a result, is the expected result still not cached?
+					// 2. if yes, then we'll notify the status callback OnWaitingForDataChanged() and make waiting marks here
+					// 3. if no, something strange and shouldn't happen, but proceed with
+					// 4. once the data is cached, and the waiting mark is detected, OnWaitingForDataChanged() should be called again
+
+					if (m_dataDecoder->IsTimestampBeyondCache(dueTimestamp))
+					{
+						OnWaitingForDataChanged(true);
+
+						m_syncStatus = SyncStatus::WaitForGT;
+					}
+					else
+					{
+						// Otherwise this will be strange situation, where the data is already trimmed(left behind), but still this timestamp 
+						// will require it, which could be a trimming algorithm bug or concurrent issue. Just let the time run and hopefully
+						// cache up later.
+
+						// FIXME: some corto+mesh asset will have corto blocks received consecutively for several seconds, rather than 
+						// interlaced with corto -> webp -> corto -> webp order this will cause disruption.
+						// MAYBE TRY FORCE CHANGE IT BACK TO SYNC
+					}
 				}
-				
-				
 			}
 		}
 		else
 		{
 			// just dispose whatever was decoded
-			m_dataDecoder->DisposeResult(m_dataDecoder->PopResult());
+			m_dataDecoder->FlushAndDisposeResults();
+		}
+
+		// To move data decoder's cache forward
+		float medianTimestamp = dueTimestamp;
+		if (trimmingMedian >= 0)
+		{
+			medianTimestamp = trimmingMedian;
+		}
+
+		if (m_dataDecoder->TrimCache(medianTimestamp))
+		{
+			// after trimming, we'll need to call to request reading API's next frame (RequestFrameNext)
+			m_reader->ContinueRequest();
 		}
 	}
-	/////////////////////////////////////////
+}
+
+// Called every frame
+void UEvercoastStreamingReaderComp::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	// DEAL WITH DURATION INCONSISTENCY BETWEEN GT AND VIDEO
+	if (m_baseDecoderType != DT_Invalid)
+	{
+		float duration;
+		if (m_videoTextureHog && m_videoTextureHog->IsVideoOpened() && m_baseDecoderType == DT_CortoMesh)
+		{
+			check(m_reader->MeshRequiresExternalData());
+			duration = std::min(m_reader->GetDuration(), m_videoTextureHog->GetVideoDuration());
+
+			// also check the timestamp driver, esp when geometry duration mismatch with video duration
+			// This normally should be done in NotifyChannelInfo() however due to streaming assets' async requirements
+			// it has to be done here for a non-blocking experience
+
+			if (duration > 0 && m_timestampDriver->GetVideoDuration() > duration)
+			{
+				// force changing video duration as we found a better one
+				m_timestampDriver->ForceChangeVideoDuration(duration);
+			}
+
+		}
+		else
+		{
+			duration = m_reader->GetDuration();
+		}
+
+		bool isInSequencer = false;
+		if (m_timestampDriver && m_timestampDriver->IsSequencerOverriding())
+		{
+			isInSequencer = true;
+		}
+
+		if (isInSequencer)
+		{
+			TickSequencerPlayback(duration);
+		}
+		else
+		{
+			TickNormalPlayback(duration);
+		}
+	}
+
 	
+
+
 	/////////////////////////////////////////
 	// Misc components tick
 	if (m_reader)
@@ -1357,41 +1612,23 @@ void UEvercoastStreamingReaderComp::TickComponent(float DeltaTime, ELevelTick Ti
 	/////////////////////////////////////////
 }
 
-UTexture* UEvercoastStreamingReaderComp::FindVideoTexture(int64_t frameIndex)
+UTexture* UEvercoastStreamingReaderComp::FindVideoTexture(int64_t frameIndex) const
 {
 	check(m_videoTextureHog);
 	// find video texture from video texture hog
 	return m_videoTextureHog->QueryTextureAtIndex(frameIndex);
 }
 
-bool UEvercoastStreamingReaderComp::InvalidateVideoTexture(UTexture* pTex)
+void UEvercoastStreamingReaderComp::TrimVideoCache(double medianTimestamp)
 {
 	check(m_videoTextureHog);
-	return m_videoTextureHog->InvalidateTextureAndBefore(pTex);
+	m_videoTextureHog->TrimCache(medianTimestamp, 0.5 * m_reader->GetFrameInterval());
 }
 
-bool UEvercoastStreamingReaderComp::InvalidateVideoTextureBeforeFrameIndex(int64_t frameIndex)
+bool UEvercoastStreamingReaderComp::IsTimestampBeyondVideoCache(double timestamp) const
 {
 	check(m_videoTextureHog);
-	return m_videoTextureHog->InvalidateTextureAndBeforeByFrameIndex(frameIndex);
-}
-
-bool UEvercoastStreamingReaderComp::IsVideoFrameWithinHogCache(int64_t frameIndex)
-{
-	check(m_videoTextureHog);
-	return m_videoTextureHog->IsFrameWithinCachedRange(frameIndex);
-}
-
-bool UEvercoastStreamingReaderComp::IsVideoFrameBeyondHogCache(int64_t frameIndex)
-{
-	check(m_videoTextureHog);
-	return m_videoTextureHog->IsFrameBeyondCachedRange(frameIndex);
-}
-
-bool UEvercoastStreamingReaderComp::IsVideoFrameBeforeHogCache(int64_t frameIndex)
-{
-	check(m_videoTextureHog);
-	return m_videoTextureHog->IsFrameBeforeCachedRange(frameIndex);
+	return m_videoTextureHog->IsTextureBeyondRange(timestamp, 0.5 * m_reader->GetFrameInterval());
 }
 
 bool UEvercoastStreamingReaderComp::IsVideoTextureHogFull() const
@@ -1420,36 +1657,35 @@ void UEvercoastStreamingReaderComp::StreamingPlay()
 	}
 }
 
+
 void UEvercoastStreamingReaderComp::StreamingSeekTo(float timestamp)
 {
 	if (!m_reader)
 		return;
 
-	if (m_playbackStatus == PlaybackStatus::Playing || 
-		m_playbackStatus == PlaybackStatus::Paused)
+	if (m_playbackStatus == PlaybackStatus::Paused ||
+		m_playbackStatus == PlaybackStatus::Playing)
 	{
-		
-		if (m_reader->GetSeekingTarget() != timestamp) // protect reader+videotexturehog from excessive seeking request which never give mediaplayer a break
+		// if cache contains the frame, we just turn the clock
+		// otherwise, we'll need a full dispose-seek-cache circle
+		if (IsFrameCached(timestamp))
+		{
+			m_timestampDriver->ResetTimerTo(timestamp, false);
+		}
+		else
 		{
 			m_reader->RequestFrameOnTimestamp(timestamp);
 
 			// Request video texture hogging too (we don't have other means to sync the video hogger, and ToggleVideoTextureHogIfPossible() is not for this purpose)
-			if (m_videoTextureHog && m_baseDecoder && m_baseDecoder->GetType() == DT_CortoMesh)
+			if (m_videoTextureHog && m_baseDecoderType == DT_CortoMesh)
 			{
 				check(m_reader->MeshRequiresExternalData());
-				m_videoTextureHog->ResetTo(timestamp - m_reader->GetFrameInterval()); // give one frame of clearance
+				m_videoTextureHog->ResetTo(timestamp);
 				if (!m_videoTextureHog->IsHogging())
 					m_videoTextureHog->StartHogging();
 			}
 		}
-	}
-}
-
-void UEvercoastStreamingReaderComp::RecalcequencerOverrideLoopCount()
-{
-	if (m_timestampDriver)
-	{
-		m_timestampDriver->RecalcSequencerTimestampOverrideLoopCount();
+		
 	}
 }
 
@@ -1458,25 +1694,10 @@ void UEvercoastStreamingReaderComp::StreamingJump(float deltaTime)
 	if (!m_reader)
 		return;
 
-	if (m_playbackStatus == PlaybackStatus::Playing || 
-		m_playbackStatus == PlaybackStatus::Paused)
-	{
-		float timestamp = m_reader->GetSeekingTarget() + deltaTime;
+	float timestamp = m_currentMatchingTimestamp + deltaTime;
+	timestamp = std::min(std::max(timestamp, 0.0f), StreamingGetDuration());
 
-		if (m_reader->GetSeekingTarget() != timestamp) // protect reader+videotexturehog from excessive seeking request which never give mediaplayer a break
-		{
-			m_reader->RequestFrameOnTimestamp(timestamp);
-
-			// Request video texture hogging too (we don't have other means to sync the video hogger, and ToggleVideoTextureHogIfPossible() is not for this purpose)
-			if (m_videoTextureHog && m_baseDecoder && m_baseDecoder->GetType() == DT_CortoMesh)
-			{
-				check(m_reader->MeshRequiresExternalData());
-				m_videoTextureHog->ResetTo(timestamp - m_reader->GetFrameInterval()); // give one frame of clearance
-				if (!m_videoTextureHog->IsHogging())
-					m_videoTextureHog->StartHogging();
-			}
-		}
-	}
+	StreamingSeekTo(timestamp);
 }
 
 void UEvercoastStreamingReaderComp::StreamingPrevFrame()
@@ -1484,8 +1705,8 @@ void UEvercoastStreamingReaderComp::StreamingPrevFrame()
 	if (!m_reader)
 		return;
 
-
-	StreamingJump(-m_reader->GetFrameInterval());
+	float nextFrameTimestamp = std::max(m_currentMatchingTimestamp - m_reader->GetFrameInterval(), 0.0f);
+	StreamingSeekTo(nextFrameTimestamp);
 }
 
 void UEvercoastStreamingReaderComp::StreamingNextFrame()
@@ -1493,7 +1714,10 @@ void UEvercoastStreamingReaderComp::StreamingNextFrame()
 	if (!m_reader)
 		return;
 
-	m_reader->RequestFrameNext();
+	float duration = StreamingGetDuration();
+	float nextFrameTimestamp = std::min(m_currentMatchingTimestamp + m_reader->GetFrameInterval(), duration);
+
+	StreamingSeekTo(nextFrameTimestamp);
 }
 
 float UEvercoastStreamingReaderComp::StreamingGetCurrentTimestamp() const
@@ -1546,7 +1770,7 @@ float UEvercoastStreamingReaderComp::StreamingGetDuration() const
 		return 0.0f;
 
 	float duration;
-	if (m_baseDecoder && m_baseDecoder->GetType() == DT_CortoMesh && m_videoTextureHog)
+	if (m_baseDecoderType == DT_CortoMesh && m_videoTextureHog)
 	{
 		check(m_reader->MeshRequiresExternalData());
 		duration = std::min(m_reader->GetDuration(), m_videoTextureHog->GetVideoDuration());
@@ -1561,6 +1785,14 @@ float UEvercoastStreamingReaderComp::StreamingGetDuration() const
 	}
 
 	return duration;
+}
+
+int32 UEvercoastStreamingReaderComp::StreamingGetCurrentFrameRate() const
+{
+	if (!m_reader)
+		return 0;
+
+	return (int32)m_reader->GetFrameRate();
 }
 
 
@@ -1673,6 +1905,17 @@ void UEvercoastStreamingReaderComp::SetPlaybackMicroTimeManagement(float overrid
 {
 	if (m_timestampDriver)
 		m_timestampDriver->EnterSequencerTimestampOverride(overrideCurrTime, blockOnTimestamp);
+}
+
+bool UEvercoastStreamingReaderComp::IsPlaybackInMicroTimeManagement() const
+{
+	if (m_timestampDriver)
+	{
+		return m_timestampDriver->IsSequencerOverriding();
+	}
+
+	return false;
+
 }
 
 void UEvercoastStreamingReaderComp::RemovePlaybackMicroTimeManagement()

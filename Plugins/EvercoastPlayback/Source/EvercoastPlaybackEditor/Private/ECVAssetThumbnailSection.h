@@ -18,7 +18,6 @@ class FECVAssetThumbnailSection
 {
 public:
 	FECVAssetThumbnailSection(UECVAssetTrackSection& InSection, TSharedPtr<FTrackEditorThumbnailPool> InThumbnailPool, TSharedPtr<ISequencer> InSequencer);
-
 public:
 	//~ FGCObject interface
 
@@ -30,16 +29,20 @@ public:
 public:
 	//~ FThumbnailSection interface
 	virtual FMargin GetContentPadding() const override;
+#if (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4)
+	virtual float GetSectionHeight(const UE::Sequencer::FViewDensityInfo& ViewDensity) const override;
+#else
 	virtual float GetSectionHeight() const override;
+#endif
 	virtual FText GetSectionTitle() const override;
 	virtual void SetSingleTime(double GlobalTime) override;
 	virtual int32 OnPaintSection(FSequencerSectionPainter& InPainter) const override;
 
 private:
 
-	UEvercoastStreamingReaderComp* GetTemplateECVReader() const;
+	UEvercoastStreamingReaderComp* GetECVReader() const;
 	void DrawFilmBorder(FSequencerSectionPainter& InPainter, FVector2D SectionSize) const;
-	void DrawLoopIndicators(FSequencerSectionPainter& InPainter, FTimespan ECVAssetDuration, FVector2D SectionSize) const;
+	void DrawCustomFrames(FSequencerSectionPainter& InPainter, FFrameNumber ECVAssetStartFrame, FTimespan ECVAssetDuration, FVector2D SectionSize) const;
 
 	/** The section object that owns this section. */
 	TWeakObjectPtr<UECVAssetTrackSection> SectionPtr;

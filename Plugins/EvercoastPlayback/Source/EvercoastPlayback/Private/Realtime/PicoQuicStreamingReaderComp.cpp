@@ -1,6 +1,6 @@
 #include "Realtime/PicoQuicStreamingReaderComp.h"
 #include "GhostTreeFormatReader.h"
-#include "EvercoastDecoder.h"
+#include "EvercoastVoxelDecoder.h"
 #include "EvercoastVoxelRendererComp.h"
 #include "EvercoastStreamingDataUploader.h"
 #include "EvercoastRendererSelectorComp.h"
@@ -156,6 +156,8 @@ void UPicoQuicStreamingReaderComp::Connect(const FString& serverName, int port, 
 		}
 
 		m_decodedResultQueue.clear();
+
+		m_dataDecoder->FlushAndDisposeResults();
 	}
 
 	// Get config
@@ -370,15 +372,15 @@ void UPicoQuicStreamingReaderComp::TickComponent(float DeltaTime, ELevelTick Tic
 
 	if (m_dataDecoder && Renderer)
 	{
-		auto uploader = Renderer->GetDataUploader();
-		if (!uploader)
+		std::vector<std::shared_ptr<IEvercoastStreamingDataUploader>> uploaders= Renderer->GetDataUploaders();
+		if (uploaders.empty())
 		{
 			// We have to create sub renderer in main thread
 			PrepareRenderer();
-			uploader = Renderer->GetDataUploader();
+			uploaders = Renderer->GetDataUploaders();
 		}
 
-		if (uploader)
+		if (!uploaders.empty())
 		{
 			double audioTimestamp = 0;
 
@@ -417,7 +419,10 @@ void UPicoQuicStreamingReaderComp::TickComponent(float DeltaTime, ELevelTick Tic
 				{
 					if (!m_dataUploadingPaused)
 					{
-						uploader->Upload(result.get());
+						for (auto uploader : uploaders)
+						{
+							uploader->Upload(result.get());
+						}
 						// manually release the result from decoder
 						m_dataDecoder->DisposeResult(result);
 
@@ -446,7 +451,10 @@ void UPicoQuicStreamingReaderComp::TickComponent(float DeltaTime, ELevelTick Tic
 				auto syncResult = PopSynchronisedResultRegardsAudioTimestamp(audioTimestamp, m_dataDecoder);
 				if (syncResult)
 				{
-					uploader->Upload(syncResult.get());
+					for (auto uploader : uploaders)
+					{
+						uploader->Upload(syncResult.get());
+					}
 
 					m_dataDecoder->DisposeResult(syncResult);
 
@@ -480,7 +488,7 @@ void UPicoQuicStreamingReaderComp::OnStreamTimer()
 	UE_LOG(EvercoastRealtimeLog, Log, TEXT("Stream timer tick"));
 }
 
-std::shared_ptr<IEvercoastStreamingDataDecoder> UPicoQuicStreamingReaderComp::CreateDecoder(uint32_t stream_type)
+std::shared_ptr<IEvercoastRealtimeDataDecoder> UPicoQuicStreamingReaderComp::CreateDecoder(uint32_t stream_type)
 {
 	if (stream_type == 0x304D4345) // "ECM0"
 	{
@@ -603,6 +611,17 @@ void UPicoQuicStreamingReaderComp::StopPreviewInEditor()
 
 #endif
 
+void UPicoQuicStreamingReaderComp::Resync()
+{
+	if (!IsConnected())
+		return;
+
+	if (!IgnoreAudio && m_sound)
+	{
+		m_sound->ResetAudio();
+	}
+}
+
 void UPicoQuicStreamingReaderComp::Pause(bool pause)
 {
 	m_dataUploadingPaused = pause;
@@ -672,7 +691,7 @@ int UPicoQuicStreamingReaderComp::GetCachedVideoFrameCount()
 	return (int)m_decodedResultQueue.size();
 }
 
-std::shared_ptr<GenericDecodeResult> UPicoQuicStreamingReaderComp::PopSynchronisedResultRegardsAudioTimestamp(double audioTimestamp, std::shared_ptr<IEvercoastStreamingDataDecoder> disposer)
+std::shared_ptr<GenericDecodeResult> UPicoQuicStreamingReaderComp::PopSynchronisedResultRegardsAudioTimestamp(double audioTimestamp, std::shared_ptr<IEvercoastRealtimeDataDecoder> disposer)
 {
 	// Normal: when same geometry packets arrive later than audio packets, so the current audio timestamp 
 	// is usually greater than the current geometry timestamp

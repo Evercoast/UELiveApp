@@ -7,7 +7,13 @@
 #include "MovieSceneTimeHelpers.h"
 #include "Compilation/MovieSceneCompiledDataManager.h"
 #include "Evaluation/MovieSceneEvaluationTemplate.h"
+#include "Fonts/FontMeasure.h"
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4
+#include "TimeToPixel.h"
+#else
 #include "CommonMovieSceneTools.h"
+#endif
 
 #include "EvercoastStreamingReaderComp.h"
 
@@ -27,11 +33,17 @@ FMargin FECVAssetThumbnailSection::GetContentPadding() const
 	return FMargin(8.0f, 15.0f);
 }
 
-
+#if (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4)
+float FECVAssetThumbnailSection::GetSectionHeight(const UE::Sequencer::FViewDensityInfo& ViewDensity) const
+{
+	return FThumbnailSection::GetSectionHeight(ViewDensity) + 2 * 9.0f; // make space for the film border
+}
+#else
 float FECVAssetThumbnailSection::GetSectionHeight() const
 {
 	return FThumbnailSection::GetSectionHeight() + 2 * 9.0f; // make space for the film border
 }
+#endif
 
 
 FText FECVAssetThumbnailSection::GetSectionTitle() const
@@ -80,7 +92,7 @@ int32 FECVAssetThumbnailSection::OnPaintSection(FSequencerSectionPainter& InPain
 	
 
 	// draw loop overlays
-	UEvercoastStreamingReaderComp* ECVReader = GetTemplateECVReader();
+	UEvercoastStreamingReaderComp* ECVReader = GetECVReader();
 
 	if (ECVReader == nullptr)
 	{
@@ -95,9 +107,16 @@ int32 FECVAssetThumbnailSection::OnPaintSection(FSequencerSectionPainter& InPain
 		return LayerId;
 	}
 
+	UECVAssetTrackSection* ECVSection = SectionPtr.Get();
+	if (!ECVSection)
+	{
+		return LayerId;
+	}
+
 	InPainter.DrawElements.PushClip(ClippingZone);
 	{
-		DrawLoopIndicators(InPainter, ECVDuration, SectionSize);
+		//DrawLoopIndicators(InPainter, ECVDuration, SectionSize);
+		DrawCustomFrames(InPainter, ECVSection->StartFrameOffset, ECVDuration, SectionSize);
 	}
 	InPainter.DrawElements.PopClip();
 
@@ -105,82 +124,44 @@ int32 FECVAssetThumbnailSection::OnPaintSection(FSequencerSectionPainter& InPain
 
 }
 
-UEvercoastStreamingReaderComp* FECVAssetThumbnailSection::GetTemplateECVReader() const
+UEvercoastStreamingReaderComp* FECVAssetThumbnailSection::GetECVReader() const
 {
-	// locate the track that evaluates this section
-	if (!SectionPtr.IsValid())
+	// Otherwise, we'll need to find the reader through bound objects. This happens in spawnables
+	UECVAssetTrackSection* ECVSection = SectionPtr.Get();
+	if (ECVSection)
 	{
-		return nullptr;
-	}
-
-	TSharedPtr<ISequencer> Sequencer = SequencerPtr.Pin();
-
-	if (!Sequencer.IsValid())
-	{
-		return nullptr; // no movie scene player
-	}
-
-	// @todo: arodham: Test this and/or check dirty/compile?
-	FMovieSceneRootEvaluationTemplateInstance& Instance = Sequencer->GetEvaluationTemplate();
-
-	FMovieSceneSequenceID           SequenceId = Sequencer->GetFocusedTemplateID();
-	UMovieSceneCompiledDataManager* CompiledDataManager = Instance.GetCompiledDataManager();
-	UMovieSceneSequence* SubSequence = Instance.GetSequence(SequenceId);
-	FMovieSceneCompiledDataID       CompiledDataID = CompiledDataManager->GetDataID(SubSequence);
-
-	if (!CompiledDataID.IsValid())
-	{
-		return nullptr;
-	}
-
-	const FMovieSceneEvaluationTemplate* Template = CompiledDataManager->FindTrackTemplate(CompiledDataID);
-	if (Template == nullptr)
-	{
-		return nullptr; // section template not found
-	}
-
-	auto OwnerTrack = Cast<UMovieSceneTrack>(SectionPtr->GetOuter());
-
-	if (OwnerTrack == nullptr)
-	{
-		return nullptr; // media track not found
-	}
-
-	const FMovieSceneTrackIdentifier  TrackIdentifier = Template->GetLedger().FindTrackIdentifier(OwnerTrack->GetSignature());
-	const FMovieSceneEvaluationTrack* EvaluationTrack = Template->FindTrack(TrackIdentifier);
-
-	if (EvaluationTrack == nullptr)
-	{
-		return nullptr; // evaluation track not found
-	}
-
-	FECVAssetPersistentData* ECVAssetData = nullptr;
-
-	// find the persistent data of the section being drawn
-	TArrayView<const FMovieSceneEvalTemplatePtr> Children = EvaluationTrack->GetChildTemplates();
-	FPersistentEvaluationData PersistentData(*Sequencer.Get());
-
-	for (int32 ChildIndex = 0; ChildIndex < Children.Num(); ++ChildIndex)
-	{
-		if (Children[ChildIndex]->GetSourceSection() == SectionPtr)
+		TSharedPtr<ISequencer> Sequencer = SequencerPtr.Pin();
+		UMovieScene* MovieScene = ECVSection->GetTypedOuter<UMovieScene>();
+		if (MovieScene && Sequencer)
 		{
-			FMovieSceneEvaluationKey SectionKey(SequenceId, TrackIdentifier, ChildIndex);
-			PersistentData.SetSectionKey(SectionKey);
-			ECVAssetData = PersistentData.FindSectionData<FECVAssetPersistentData>();
+			TArray<FMovieSceneBinding> Bindings = MovieScene->GetBindings();
+			for (const FMovieSceneBinding& Binding : Bindings)
+			{
+				// Check if this binding controls the section's track
+				if (Binding.GetTracks().Contains(ECVSection->GetTypedOuter<UMovieSceneTrack>()))
+				{
+					// Query bound objects
+					TArrayView<TWeakObjectPtr<UObject>> BoundObjects = Sequencer->FindBoundObjects(Binding.GetObjectGuid(), Sequencer->GetFocusedTemplateID());
 
-			break;
+					if (BoundObjects.Num() > 0)
+					{
+						UObject* SpawnedObject = BoundObjects[0].Get();
+						if (SpawnedObject && SpawnedObject->IsA(AEvercoastVolcapActor::StaticClass()))
+						{
+							// Successfully found bound object, store it for later use
+							AEvercoastVolcapActor* VolcapActor = CastChecked<AEvercoastVolcapActor>(SpawnedObject);
+							return VolcapActor->Reader;
+						}
+					}
+						
+				}
+			}
 		}
 	}
 
-	// get the template's media player
-	if (ECVAssetData == nullptr)
-	{
-		return nullptr; // section persistent data not found
-	}
+	return nullptr;
 
-	return ECVAssetData->GetEvercoastReader();
 }
-
 
 void FECVAssetThumbnailSection::DrawFilmBorder(FSequencerSectionPainter& InPainter, FVector2D SectionSize) const
 {
@@ -210,46 +191,160 @@ void FECVAssetThumbnailSection::DrawFilmBorder(FSequencerSectionPainter& InPaint
 }
 
 
-void FECVAssetThumbnailSection::DrawLoopIndicators(FSequencerSectionPainter& InPainter, FTimespan AssetDuration, FVector2D SectionSize) const
+void FECVAssetThumbnailSection::DrawCustomFrames(FSequencerSectionPainter& InPainter, FFrameNumber ECVAssetStartFrame, FTimespan ECVAssetDuration, FVector2D SectionSize) const
 {
 	static const FSlateBrush* GenericBrush = FCoreStyle::Get().GetBrush("GenericWhiteBox");
 
-	UECVAssetTrackSection* ECVSection = Cast<UECVAssetTrackSection>(Section);
+	UEvercoastStreamingReaderComp* ECVReader = GetECVReader();
+	if (!ECVReader)
+		return;
+
+	//UECVAssetTrackSection* ECVSection = Cast<UECVAssetTrackSection>(Section);
+
+	TSharedRef<FSlateFontMeasure> FontMeasureService = FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
+
+	//const FSlateFontInfo FontInfo = FCoreStyle::GetDefaultFontStyle("Regular", 10);
+	const FSlateFontInfo FontInfo = FCoreStyle::Get().GetFontStyle(TEXT("NormalText"));
+	const FLinearColor TextColor = FLinearColor::White;
+	const FLinearColor BoxColor = FLinearColor::White;
+
+	const FGeometry& Geometry = InPainter.SectionGeometry;
+	const FSlateRect AbsoluteClipRect = Geometry.GetLayoutBoundingRect();
+	const FVector2D LocalClipTopLeft = Geometry.AbsoluteToLocal(AbsoluteClipRect.GetTopLeft());
+	const FVector2D LocalClipBottomRight = Geometry.AbsoluteToLocal(AbsoluteClipRect.GetBottomRight());
+	const FSlateRect LocalClipRect(LocalClipTopLeft.X, LocalClipTopLeft.Y,
+		LocalClipBottomRight.X, LocalClipBottomRight.Y);
+
+	TRange<FFrameNumber> SectionRange = Section->GetRange();
 
 	const FTimeToPixel& TimeToPixelConverter = InPainter.GetTimeConverter();
 
 	FFrameRate TickResolution = Section->GetTypedOuter<UMovieScene>()->GetTickResolution();
-	double SectionDuration = FFrameTime(UE::MovieScene::DiscreteSize(Section->GetRange())) / TickResolution;
-	float MediaSizeX = AssetDuration.GetTotalSeconds() * SectionSize.X / SectionDuration;
-	// Use SecondsDeltaToPixel()
-	float DrawOffset = MediaSizeX - TimeToPixelConverter.SecondsDeltaToPixel(TickResolution.AsSeconds(ECVSection->StartFrameOffset));
+	FFrameRate DisplayRate = Section->GetTypedOuter<UMovieScene>()->GetDisplayRate();
 
-	while (DrawOffset < SectionSize.X)
+	double SectionDuration = FFrameTime(UE::MovieScene::DiscreteSize(Section->GetRange())) / TickResolution;
+	
+	uint32_t FrameRate = ECVReader->StreamingGetCurrentFrameRate();
+	float BoxWidth = TimeToPixelConverter.SecondsDeltaToPixel(1.0f / FrameRate);
+	const FVector2D BoxSize(BoxWidth, 50.0f);
+
+	int frameCount = 0;
+
+	// convert tick frame -> tick time -> display time -> display frame
+	FFrameNumber CurrentTickFrame = ECVAssetStartFrame;
+	FFrameTime CurrentTickTime(CurrentTickFrame);
+	FFrameTime CurrentDisplayTime = FFrameRate::TransformTime(CurrentTickTime, TickResolution, DisplayRate);
+	FFrameNumber CurrentDisplayFrame = CurrentDisplayTime.FloorToFrame();
+
+	// Frame number *without* ECVAssetStartFrame
+	FFrameNumber SectionTickFrame = 0;
+	FFrameTime SectionTickTime(SectionTickFrame);
+	FFrameTime SectionDisplayTime = FFrameRate::TransformTime(SectionTickTime, TickResolution, DisplayRate);
+	FFrameNumber SectionDisplayFrame = SectionDisplayTime.FloorToFrame();
+	float DrawOffset = 0;
+
+	while(DrawOffset < SectionSize.X)
 	{
+		// In-screen test
+		FSlateRect QuadRect(DrawOffset, 5.0f, DrawOffset + BoxSize.X, 5.0f + BoxSize.Y);
+		if (!FSlateRect::DoRectanglesIntersect(QuadRect, LocalClipRect))
+		{
+			break;
+		}
+
+		FVector2D BoxPosition(DrawOffset, 5.0f);
+
 		FSlateDrawElement::MakeBox(
 			InPainter.DrawElements,
 			InPainter.LayerId++,
-#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 2
-
-			// Need to explicitly specify transform order
-			InPainter.SectionGeometry.ToPaintGeometry(
-				FVector2D(1.0f, SectionSize.Y),  // size
-				FSlateLayoutTransform(1.0f, // scale
-					TransformPoint(1.0, // scale
-					UE::Slate::CastToVector2f(FVector2D(DrawOffset, 0.0f) // offset
-					)))),
-#else
-			// UE 4.27 - 5.1
-			InPainter.SectionGeometry.ToPaintGeometry(FVector2D(DrawOffset, 0.0f), FVector2D(1.0f, SectionSize.Y)),
-#endif
-			
-			GenericBrush,
+			InPainter.SectionGeometry.ToPaintGeometry(BoxPosition, BoxSize),
+			FCoreStyle::Get().GetBrush("FocusRectangle"),
 			ESlateDrawEffect::None,
-			FLinearColor::Gray
+			BoxColor
 		);
 
-		DrawOffset += MediaSizeX;
+		FString FrameText = FString::Printf(TEXT("%d"), CurrentDisplayFrame.Value);
+		FVector2D TextPosition = BoxPosition + FVector2D(2.0f, 2.0f);
+
+		FVector2D TextSize = FontMeasureService->Measure(FrameText, FontInfo);
+
+
+		FSlateDrawElement::MakeText(
+			InPainter.DrawElements,
+			InPainter.LayerId++,
+			InPainter.SectionGeometry.ToPaintGeometry(TextPosition, TextSize),
+			FrameText,
+			FontInfo,
+			ESlateDrawEffect::None,
+			TextColor
+		);
+
+		double clipTimestamp = CurrentTickTime / TickResolution;
+		FString TimestampText = FString::Printf(TEXT("%.2f"), clipTimestamp);
+		TextPosition = BoxPosition + FVector2D(2.0f, 52.0f);
+		TextSize = FontMeasureService->Measure(TimestampText, FontInfo);
+
+		FSlateDrawElement::MakeText(
+			InPainter.DrawElements,
+			InPainter.LayerId++,
+			InPainter.SectionGeometry.ToPaintGeometry(TextPosition, TextSize),
+			TimestampText,
+			FontInfo,
+			ESlateDrawEffect::None,
+			TextColor
+		);
+
+
+		// convert display frame -> display time -> tick time -> tick frame
+		CurrentDisplayFrame++;
+		CurrentDisplayTime = FFrameTime(CurrentDisplayFrame);
+		CurrentTickTime = FFrameRate::TransformTime(CurrentDisplayTime, DisplayRate, TickResolution);
+		CurrentTickFrame = CurrentTickTime.FloorToFrame();
+
+		// check clip loop, if so reset counting
+		if (clipTimestamp >= ECVAssetDuration.GetTotalSeconds())
+		{
+			
+			CurrentTickFrame = 0;
+			CurrentTickTime = FFrameTime(CurrentTickFrame);
+			CurrentDisplayTime = FFrameRate::TransformTime(CurrentTickTime, TickResolution, DisplayRate);
+			CurrentDisplayFrame = CurrentDisplayTime.FloorToFrame();
+
+
+			// draw loop indicator
+			FSlateDrawElement::MakeBox(
+				InPainter.DrawElements,
+				InPainter.LayerId++,
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 2
+
+				// Need to explicitly specify transform order
+				InPainter.SectionGeometry.ToPaintGeometry(
+					FVector2D(1.0f, SectionSize.Y),  // size
+					FSlateLayoutTransform(1.0f, // scale
+						TransformPoint(1.0, // scale
+							UE::Slate::CastToVector2f(FVector2D(DrawOffset, 0.0f) // offset
+							)))),
+#else
+				// UE 4.27 - 5.1
+				InPainter.SectionGeometry.ToPaintGeometry(FVector2D(BoxPosition.X + BoxSize.X, 0.0f), FVector2D(1.0f, SectionSize.Y)),
+#endif
+
+				GenericBrush,
+				ESlateDrawEffect::None,
+				FLinearColor::Gray
+			);
+		}
+
+		// grid drawing frame/time update
+		SectionDisplayFrame++;
+		SectionDisplayTime = FFrameTime(SectionDisplayFrame);
+		SectionTickTime = FFrameRate::TransformTime(SectionDisplayTime, DisplayRate, TickResolution);
+		SectionTickFrame = SectionTickTime.FloorToFrame();
+		
+		
+		DrawOffset = TimeToPixelConverter.SecondsDeltaToPixel(SectionDisplayTime / DisplayRate);
 	}
+	
 }
 
 

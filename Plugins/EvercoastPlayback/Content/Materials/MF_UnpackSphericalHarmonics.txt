@@ -1,0 +1,10 @@
+uint r = (uint)in_r;
+uint g = (uint)in_g;
+uint b = (uint)in_b;
+uint offset = (uint)in_offset;
+
+return float3(
+    (r >> offset) & 0xffu,
+    (g >> offset) & 0xffu,
+    (b >> offset) & 0xffu
+) / 127.5f - 1.0f;

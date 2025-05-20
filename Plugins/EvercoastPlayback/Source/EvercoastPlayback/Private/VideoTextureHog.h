@@ -19,11 +19,13 @@ public:
 
 	int64_t frameIndex = -1;
 	double frameTimestamp = -1.0;
+	// TODO: still needed??
 	bool isUsed = false;
 
 	void InitTexture(int width, int height, int index, EPixelFormat format = EPixelFormat::PF_B8G8R8A8);
 	void InitRenderTargetableTexture(int width, int height, int index, EPixelFormat format = EPixelFormat::PF_B8G8R8A8);
 	void FreeTexture();
+	// TODO: still needed??
 	void MarkAsUsed(bool used)
 	{
 		isUsed = used;
@@ -50,7 +52,6 @@ public:
 	virtual bool Close();
 	virtual bool IsVideoOpened();
 	virtual bool ResetTo(double timestmap, const std::function<void()>& callback = [](){} );
-	virtual bool JumpBy(double timestampOffset, const std::function<void()>& callback = []() {});
 	virtual bool StartHogging();
 	virtual bool StopHogging();
 	virtual bool IsHogging() const;
@@ -75,4 +76,8 @@ public:
 	virtual bool IsFrameBeyondCachedRange(int64_t frameIndex) const;
 	// --f--|<--------->|-----
 	virtual bool IsFrameBeforeCachedRange(int64_t frameIndex) const;
+	// Trim the cache falls out side of the median +/- halfCacheWidth
+	virtual void TrimCache(double medianTimestamp, double halfFrameInterval);
+
+	virtual bool IsTextureBeyondRange(double timestamp, double halfFrameInterval) const;
 };

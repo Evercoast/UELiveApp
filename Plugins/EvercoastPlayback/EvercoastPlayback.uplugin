@@ -1,7 +1,7 @@
 {
     "FileVersion": 3,
-    "Version": 510,
-    "VersionName": "0.5.1",
+    "Version": 700,
+    "VersionName": "0.7.0",
     "FriendlyName": "EvercoastPlayback",
     "Description": "Playback and render Evercoast's ECV/ECM contents",
     "Category": "Other",
@@ -32,7 +32,7 @@
             "Enabled": true
         },
         {
-            "Name": "ElectraPlayer",
+            "Name": "Niagara",
             "Enabled": true
         }
     ],

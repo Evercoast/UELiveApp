@@ -1,7 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 /*=============================================================================
-	EvercoastLocalVertexFactory.ush: Local vertex factory shader code.
+	EvercoastLocalVertexFactory_5_0.ush: Local vertex factory shader code.
 =============================================================================*/
 
 #include "/Engine/Private/VertexFactoryCommon.ush"

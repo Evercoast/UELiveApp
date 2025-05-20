@@ -45,7 +45,7 @@ public:
 	int32 WorldNormalSmoothIteration = 2;
 
 	// The world normal size after filtering, will determine the quality of final output normal. It will be ignored if OverrideWorldNormalRenderTarget is set
-	UPROPERTY(EditAnywhere, meta = (EditCondition = "bGenerateNormal && (OverrideWorldNormalRenderTarget[0] == nullptr || OverrideWorldNormalRenderTarget[1] == nullptr)"), BlueprintSetter = SetFilteredWorldNormalSize, Category = "Rendering");
+	UPROPERTY(EditAnywhere, meta = (EditCondition = "bGenerateNormal"), BlueprintSetter = SetFilteredWorldNormalSize, Category = "Rendering");
 	int32 FilteredWorldNormalSize = 512;
 
 	// Allow user to provide their own normal render target, for outputting world normal purpose. Its dimension should be equal or smaller than GenerateWorldNormalSize

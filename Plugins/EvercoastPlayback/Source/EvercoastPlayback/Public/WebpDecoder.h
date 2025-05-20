@@ -51,11 +51,16 @@ public:
 
 	virtual DecoderType GetType() const override;
 	virtual bool DecodeMemoryStream(const uint8_t* stream, size_t stream_size, double timestamp, int64_t frameIndex, GenericDecodeOption* option) override;
-	virtual std::shared_ptr<GenericDecodeResult> GetResult() override;
+	virtual std::shared_ptr<GenericDecodeResult> TakeResult() override;
 
 	void SetReceivingResult(std::shared_ptr<WebpDecodeResult> receivingResult)
 	{
 		result = receivingResult;
+	}
+
+	void UnsetReceivingResult()
+	{
+		result.reset();
 	}
 
 private:

@@ -49,8 +49,6 @@ public:
 
 	virtual uint32 GetMemoryFootprint(void) const override;
 	uint32 GetAllocatedSize(void) const;
-	virtual void OnTransformChanged() override;
-
 	void SetVoxelData_RenderThread(FRHICommandListBase& RHICmdList, std::shared_ptr<EvercoastLocalVoxelFrame> data);
 
 	FBoxSphereBounds GetVoxelDataBounds() const;

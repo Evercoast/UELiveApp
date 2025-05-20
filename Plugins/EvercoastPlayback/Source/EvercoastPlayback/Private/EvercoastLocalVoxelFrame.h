@@ -30,6 +30,13 @@ struct EvercoastLocalVoxelFrame
 	uint32_t m_voxelDataSize;
 
 	bool m_madeCopy;
+	GTHandle m_voxelFrameHandle;
 
 	FBoxSphereBounds CalcBounds() const;
+
+	bool ContainsVoxelFrame(const GTHandle otherVoxelFrame) const;
+
+public:
+	bool operator==(EvercoastLocalVoxelFrame& rhs) const;
+	bool operator!=(EvercoastLocalVoxelFrame& rhs) const;
 };

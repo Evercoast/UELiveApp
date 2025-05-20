@@ -1,0 +1,4 @@
+const float SH_C1 = 0.4886025119029199;
+
+float3 result = SH_C1 * (-dir.y * sh1 + dir.z * sh2 - dir.x * sh3);
+return result;

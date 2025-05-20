@@ -1,5 +1,5 @@
 #include "CortoLocalMeshFrame.h"
-#include "EvercoastDecoder.h"
+#include "EvercoastVoxelDecoder.h"
 #include "CortoWebpUnifiedDecodeResult.h"
 #include "Engine/Texture2D.h"
 #include "TextureResource.h"
@@ -70,7 +70,7 @@ CortoLocalMeshFrame::CortoLocalMeshFrame(const CortoWebpUnifiedDecodeResult* pRe
 	m_bounds = FBoxSphereBounds3f(m_positionBuffer.GetData(), GetVertexCount());
 	if (m_bounds.BoxExtent.ContainsNaN() || m_bounds.Origin.ContainsNaN())
 	{
-		UE_LOG(EvercoastDecoderLog, Error, TEXT("Bounds NaN found! Probably due to vertex data corruption with threading."));
+		UE_LOG(EvercoastVoxelDecoderLog, Error, TEXT("Bounds NaN found! Probably due to vertex data corruption with threading."));
 
 		m_bounds = FBoxSphereBounds3f(FSphere3f(FVector3f::ZeroVector, 100.0f));
 	}
@@ -101,7 +101,7 @@ void CortoLocalTextureFrame::UpdateTexture(const CortoWebpUnifiedDecodeResult* p
 
 		if (!m_localTexture || m_localTexture->GetSurfaceWidth() != Width || m_localTexture->GetSurfaceHeight() != Height)
 		{
-			UE_LOG(EvercoastDecoderLog, Warning, TEXT("Image LOD level changed."));
+			UE_LOG(EvercoastVoxelDecoderLog, Warning, TEXT("Image LOD level changed."));
 			if (m_localTexture)
 			{
 				m_localTexture->ReleaseResource();
@@ -141,7 +141,7 @@ void CortoLocalTextureFrame::UpdateTexture(const CortoWebpUnifiedDecodeResult* p
 		int32 height = pTexture->GetSurfaceHeight();
 		if (!m_localTexture || m_localTexture->GetSurfaceWidth() != width || m_localTexture->GetSurfaceHeight() != height)
 		{
-			UE_LOG(EvercoastDecoderLog, Warning, TEXT("Video LOD level changed."));
+			UE_LOG(EvercoastVoxelDecoderLog, Warning, TEXT("Video LOD level changed."));
 			if (m_localTexture)
 			{
 				m_localTexture->ReleaseResource();
@@ -185,7 +185,7 @@ void CortoLocalTextureFrame::UpdateTexture(const CortoWebpUnifiedDecodeResult* p
 	else
 	{
 		// wrong
-		UE_LOG(EvercoastDecoderLog, Error, TEXT("WebP image result or video texture result are both invalid. Unable to update decode image result"));
+		UE_LOG(EvercoastVoxelDecoderLog, Error, TEXT("WebP image result or video texture result are both invalid. Unable to update decode image result"));
 	}
 	
 }

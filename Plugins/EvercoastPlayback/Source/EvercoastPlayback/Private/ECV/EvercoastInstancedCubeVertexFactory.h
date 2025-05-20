@@ -31,11 +31,6 @@ public:
 	virtual void ReleaseRHI() override;
 	// End of FRenderResource interface
 
-	void SetSceneProxy(FEvercoastVoxelSceneProxy* Proxy)
-	{
-		SceneProxy = Proxy;
-	}
-
 	void SetInstancingData(std::shared_ptr<EvercoastLocalVoxelFrame> voxelFrame);
 	std::shared_ptr<EvercoastLocalVoxelFrame> GetInstancingData() const;
 
@@ -45,7 +40,6 @@ public:
 	}
 
 private:
-	FEvercoastVoxelSceneProxy* SceneProxy;
 	friend class FEvercoastInstancedCubeVertexFactoryShaderParameters;
 
 	std::shared_ptr<EvercoastLocalVoxelFrame> m_voxelFrame;

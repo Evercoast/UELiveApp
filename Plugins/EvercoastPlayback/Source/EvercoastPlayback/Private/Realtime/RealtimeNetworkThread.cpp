@@ -5,6 +5,7 @@
 
 #include "EvercoastStreamingDataDecoder.h"
 #include "Realtime/RealtimeMeshingPacketHeader.h"
+#include "Realtime/EvercoastRealtimeDataDecoder.h"
 
 #include "picoquic.h"
 
@@ -35,7 +36,7 @@ public:
 	};
 
 	RealtimeRunnalble(const std::string& address, int port, const std::string& accessToken, const std::string& certificatePath, UPicoAudioSoundWave* sound,
-		std::function<std::shared_ptr<IEvercoastStreamingDataDecoder>(uint32_t)> type_decision_callback,
+		std::function<std::shared_ptr<IEvercoastRealtimeDataDecoder>(uint32_t)> type_decision_callback,
 		std::function<void(void)> failure_callback,
 		std::shared_ptr<EvercoastPerfCounter> transmissionPerfCounter)
 		: m_address(address)
@@ -274,20 +275,20 @@ private:
 	std::string m_accessToken;
 	std::string m_certPath;
 
-	std::shared_ptr<IEvercoastStreamingDataDecoder> m_decoder;
+	std::shared_ptr<IEvercoastRealtimeDataDecoder> m_decoder;
 	UPicoAudioSoundWave* m_sound{nullptr};
 
 	std::atomic<bool> m_running{ false };
 	std::atomic<PicoQuic::Status> m_status{ PicoQuic::Status::NotYetConnected };
 
-	std::function<std::shared_ptr<IEvercoastStreamingDataDecoder>(uint32_t)> cached_callback;
+	std::function<std::shared_ptr<IEvercoastRealtimeDataDecoder>(uint32_t)> cached_callback;
 	std::function<void(void)> failure_callback;
 
 	std::shared_ptr<EvercoastPerfCounter> m_transmissionPerfCounter;
 };
 
 bool RealtimeNetworkThread::Connect(const std::string& address, int port, const std::string& accessToken, const std::string& certificatePath, UPicoAudioSoundWave* sound,
-	std::function<std::shared_ptr<IEvercoastStreamingDataDecoder>(uint32_t)> type_decision_callback, 
+	std::function<std::shared_ptr<IEvercoastRealtimeDataDecoder>(uint32_t)> type_decision_callback, 
 	std::function<void(void)> failure_callback,
 	std::shared_ptr<EvercoastPerfCounter> transmissionPerfCounter)
 {

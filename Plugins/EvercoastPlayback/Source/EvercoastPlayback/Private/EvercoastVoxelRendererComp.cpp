@@ -13,7 +13,7 @@
 #include "EvercoastLocalVoxelFrame.h"
 #include "EvercoastInstancedCubeVertexFactory.h"
 #include "EvercoastVoxelSceneProxy.h"
-#include "EvercoastBasicStreamingDataUploader.h"
+#include "VoxelDataUploader.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "MaterialShared.h"
 #if ENGINE_MAJOR_VERSION == 5
@@ -40,7 +40,7 @@ UEvercoastVoxelRendererComp::UEvercoastVoxelRendererComp(const FObjectInitialize
 	bTickInEditor = true; // need this to tick and subsequently call MarkRenderTransformDirty()
 	bUseAttachParentBound = false;
 	m_dirtyMark = true;
-	m_voxelUploader = std::make_shared<EvercoastBasicStreamingDataUploader>(this);
+	m_voxelUploader = std::make_shared<VoxelDataUploader>(this);
 }
 
 std::shared_ptr<IEvercoastStreamingDataUploader> UEvercoastVoxelRendererComp::GetVoxelDataUploader() const
