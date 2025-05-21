@@ -18,7 +18,7 @@ class UMaterialInstanceDynamic;
 class FEvercoastGaussianSplatSceneProxy : public FPrimitiveSceneProxy
 {
 public:
-	FEvercoastGaussianSplatSceneProxy(const UEvercoastGaussianSplatComputeComponent* component, UMaterialInstanceDynamic* material);
+	FEvercoastGaussianSplatSceneProxy(const UEvercoastGaussianSplatComputeComponent* component, UMaterialInterface* material);
 	virtual ~FEvercoastGaussianSplatSceneProxy();
 
 	/** Return a type (or subtype) specific hash for sorting purposes */
@@ -41,7 +41,7 @@ public:
 	uint32 GetAllocatedSize(void) const;
 	void SetEncodedGaussianSplat_RenderThread(FRHICommandListBase& RHICmdList, std::shared_ptr<const EvercoastGaussianSplatPassthroughResult> data);
 
-	void ResetMaterial(UMaterialInstanceDynamic* material);
+	void ResetMaterial(UMaterialInterface* material);
 
 	static FBoxSphereBounds GetDefaultLocalBounds();
 	FBoxSphereBounds GetLocalBounds() const;
@@ -69,7 +69,7 @@ private:
 	FStaticMeshVertexBuffers m_quadVertexBuffers;
 	FDynamicMeshIndexBuffer32 m_quadIndexBuffer;
 
-	UMaterialInstanceDynamic* m_material;
+	UMaterialInterface* m_material;
 
 	/** The view relevance for the gaussian material. Critical for GetViewRelevance() */
 	FMaterialRelevance MaterialRelevance;

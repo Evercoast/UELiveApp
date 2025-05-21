@@ -3,6 +3,7 @@
 #include "Gaussian/EvercoastGaussianSplatDecoder.h"
 #include "Gaussian/GaussianSplatComputeShader.h"
 #include "Gaussian/EvercoastGaussianSplatSceneProxy.h"
+#include "EvercoastVoxelDecoder.h" // log define
 #include "RHICommandList.h"
 #include "RHIUtilities.h"
 #include "GlobalShader.h"
@@ -43,13 +44,11 @@ void UEvercoastGaussianSplatComputeComponent::SetGaussianSplatMaterial(UMaterial
     {
         GaussianSplatMaterial = newMaterial;
 
-        RecreatedDynamicMaterialFromStaticMaterial();
-
         MarkRenderStateDirty();
 
         if (SceneProxy)
         {
-            ((FEvercoastGaussianSplatSceneProxy*)SceneProxy)->ResetMaterial(GaussianSplatMaterialDynamic);
+            ((FEvercoastGaussianSplatSceneProxy*)SceneProxy)->ResetMaterial(GaussianSplatMaterial);
         }
     }
 }
@@ -74,8 +73,7 @@ FPrimitiveSceneProxy* UEvercoastGaussianSplatComputeComponent::CreateSceneProxy(
 
         m_dataUploader->MarkDataDirty();
 
-        RecreatedDynamicMaterialFromStaticMaterial();
-        FEvercoastGaussianSplatSceneProxy* newSceneProxy = new FEvercoastGaussianSplatSceneProxy(this, GetCreatedDynamicMaterial());
+        FEvercoastGaussianSplatSceneProxy* newSceneProxy = new FEvercoastGaussianSplatSceneProxy(this, GaussianSplatMaterial);
 
         //newSceneProxy->bPerformLateComputeShaderSplatRecon = bReconstructOnTickOnly;
 
@@ -94,7 +92,6 @@ int32 UEvercoastGaussianSplatComputeComponent::GetNumMaterials() const
 {
     if (GaussianSplatMaterial)
         return 1;
-
     return 0;
 }
 
@@ -108,8 +105,8 @@ UMaterialInterface* UEvercoastGaussianSplatComputeComponent::GetMaterial(int32 E
 
 void UEvercoastGaussianSplatComputeComponent::GetUsedMaterials(TArray< UMaterialInterface* >& OutMaterials, bool bGetDebugMaterials) const
 {
-    if (GaussianSplatMaterialDynamic)
-        OutMaterials.Add(GaussianSplatMaterialDynamic);
+    if (GaussianSplatMaterial)
+        OutMaterials.Add(GaussianSplatMaterial);
 }
 
 
@@ -121,11 +118,16 @@ void UEvercoastGaussianSplatComputeComponent::SetGaussianSplatData(std::shared_p
 
     FEvercoastGaussianSplatSceneProxy* sceneProxy = (FEvercoastGaussianSplatSceneProxy*)(this->SceneProxy);
 
-    ENQUEUE_RENDER_COMMAND(FEvercoastGaussianSplatUpload)(
-        [sceneProxy, encodedSplatData = m_retainedEncodedSplatData](FRHICommandListImmediate& RHICmdList)
-        {
-            sceneProxy->SetEncodedGaussianSplat_RenderThread(RHICmdList, encodedSplatData);
-        });
+    if (sceneProxy)
+    {
+        ENQUEUE_RENDER_COMMAND(FEvercoastGaussianSplatUpload)(
+            [sceneProxy, encodedSplatData = m_retainedEncodedSplatData](FRHICommandListImmediate& RHICmdList)
+            {
+                sceneProxy->SetEncodedGaussianSplat_RenderThread(RHICmdList, encodedSplatData);
+            });
+
+        sceneProxy->ResetMaterial(GaussianSplatMaterial);
+    }
 }
 
 
@@ -202,20 +204,20 @@ FMaterialRelevance UEvercoastGaussianSplatComputeComponent::GetMaterialRelevance
 
 }
 
-UMaterialInstanceDynamic* UEvercoastGaussianSplatComputeComponent::GetCreatedDynamicMaterial() const
-{
-    return GaussianSplatMaterialDynamic;
-}
-
 std::shared_ptr<const EvercoastGaussianSplatPassthroughResult> UEvercoastGaussianSplatComputeComponent::GetRetainedEncodedSplatData() const
 {
     return m_retainedEncodedSplatData;
 }
 
-void UEvercoastGaussianSplatComputeComponent::RecreatedDynamicMaterialFromStaticMaterial()
+void UEvercoastGaussianSplatComputeComponent::OnRegister()
 {
-    if (GaussianSplatMaterial)
-        GaussianSplatMaterialDynamic = CreateAndSetMaterialInstanceDynamicFromMaterial(0, GaussianSplatMaterial);
-    else
-        GaussianSplatMaterialDynamic = CreateAndSetMaterialInstanceDynamicFromMaterial(0, UMaterial::GetDefaultMaterial(MD_Surface));
+    Super::OnRegister();
+    MarkRenderStateDirty();
 }
+
+
+void UEvercoastGaussianSplatComputeComponent::OnUnregister()
+{
+    Super::OnUnregister();
+}
+

@@ -30,9 +30,7 @@ FPrimitiveSceneProxy* UEvercoastGaussianSplatShadowCasterComp::CreateSceneProxy(
 
         GetDataUploader()->MarkDataDirty();
 
-        RecreatedDynamicMaterialFromStaticMaterial();
-
-        FEvercoastGaussianSplatShadowingSceneProxy* newSceneProxy = new FEvercoastGaussianSplatShadowingSceneProxy(this, GetCreatedDynamicMaterial());
+        FEvercoastGaussianSplatShadowingSceneProxy* newSceneProxy = new FEvercoastGaussianSplatShadowingSceneProxy(this, GaussianSplatMaterial);
 
         ENQUEUE_RENDER_COMMAND(FEvercoastGaussianDataUpdate)(
             [sceneProxy = newSceneProxy, encodedSplatData = GetRetainedEncodedSplatData()](FRHICommandListImmediate& RHICmdList)

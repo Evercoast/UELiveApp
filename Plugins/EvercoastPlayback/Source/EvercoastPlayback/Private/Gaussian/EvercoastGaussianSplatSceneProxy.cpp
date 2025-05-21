@@ -2,7 +2,7 @@
 #include "Gaussian/EvercoastGaussianSplatPassthroughResult.h"
 #include "Gaussian/EvercoastGaussianSplatComputeComponent.h"
 
-FEvercoastGaussianSplatSceneProxy::FEvercoastGaussianSplatSceneProxy(const UEvercoastGaussianSplatComputeComponent* component, UMaterialInstanceDynamic* material) :
+FEvercoastGaussianSplatSceneProxy::FEvercoastGaussianSplatSceneProxy(const UEvercoastGaussianSplatComputeComponent* component, UMaterialInterface* material) :
 	FPrimitiveSceneProxy(component),
 	m_vertexFactory(GetScene().GetFeatureLevel(), "GaussianSplatOrientedQuadVertexFactory"),
 	m_material(material),
@@ -195,7 +195,7 @@ void FEvercoastGaussianSplatSceneProxy::GetDynamicMeshElements(
 	uint32 VisibilityMap, FMeshElementCollector& Collector) const
 {
 	std::lock_guard<std::recursive_mutex> guard(m_gaussianFrameLock);
-	if (!m_encodedGaussian)
+	if (!m_encodedGaussian || !m_material)
 		return;
 
 	const bool bWireframe = AllowDebugViewmodes() && ViewFamily.EngineShowFlags.Wireframe;
@@ -429,7 +429,7 @@ FBoxSphereBounds FEvercoastGaussianSplatSceneProxy::GetLocalBounds() const
 }
 
 
-void FEvercoastGaussianSplatSceneProxy::ResetMaterial(UMaterialInstanceDynamic* material)
+void FEvercoastGaussianSplatSceneProxy::ResetMaterial(UMaterialInterface* material)
 {
 	m_material = material;
 }

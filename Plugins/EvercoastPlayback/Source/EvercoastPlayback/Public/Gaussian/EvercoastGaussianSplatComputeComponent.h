@@ -70,19 +70,15 @@ protected:
 #endif
 
 protected:
-    void RecreatedDynamicMaterialFromStaticMaterial();
-    UMaterialInstanceDynamic* GetCreatedDynamicMaterial() const;
     std::shared_ptr<const EvercoastGaussianSplatPassthroughResult> GetRetainedEncodedSplatData() const;
 
 public:
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+    virtual void OnRegister() override;
+    virtual void OnUnregister() override;
     //~ End UActorComponent interface
 
 private:
-    UPROPERTY(Transient)
-    UMaterialInstanceDynamic* GaussianSplatMaterialDynamic;
-
-
     std::shared_ptr<const EvercoastGaussianSplatPassthroughResult> m_retainedEncodedSplatData;
     std::shared_ptr<EvercoastGaussianSplatComputeUploader> m_dataUploader;
 

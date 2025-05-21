@@ -155,6 +155,8 @@ void UEvercoastRendererSelectorComp::ChooseCorrespondingSubRenderer(DecoderType 
 			m_currRenderer->DestroyComponent();
 
 			m_meshRenderer = nullptr;
+			m_gaussianRenderer = nullptr;
+			m_gaussianShadowCaster = nullptr;
 		}
 		m_currRenderer = m_voxelRenderer;
         m_currRenderer->SetVisibility(true, true);
@@ -199,6 +201,8 @@ void UEvercoastRendererSelectorComp::ChooseCorrespondingSubRenderer(DecoderType 
 			m_currRenderer->DestroyComponent();
 
 			m_voxelRenderer = nullptr;
+			m_gaussianRenderer = nullptr;
+			m_gaussianShadowCaster = nullptr;
 		}
 		m_currRenderer = m_meshRenderer;
         m_currRenderer->SetVisibility(true, true);
@@ -248,9 +252,8 @@ void UEvercoastRendererSelectorComp::ChooseCorrespondingSubRenderer(DecoderType 
 				m_gaussianShadowCaster->AttachToComponent(m_gaussianRenderer, FAttachmentTransformRules::KeepRelativeTransform); // attach as child component of main renderer
 				Actor->AddInstanceComponent(m_gaussianShadowCaster);
 			}
-
 			m_gaussianRenderer->SetGaussianSplatMaterial(ECVMaterial);
-			m_gaussianShadowCaster->SetGaussianSplatMaterial(ECVMaterial);
+			m_gaussianShadowCaster->SetGaussianSplatMaterial(ShadowMaterial);
 		}
 
 		if (m_currRenderer != m_gaussianRenderer && m_currRenderer != nullptr)
@@ -317,6 +320,10 @@ void UEvercoastRendererSelectorComp::PostEditChangeProperty(FPropertyChangedEven
 	if (PropertyChangedEvent.GetPropertyName() == FName(TEXT("ECVMaterial")))
 	{
 		SetECVMaterial(ECVMaterial);
+	}
+	else if (PropertyChangedEvent.GetPropertyName() == FName(TEXT("ShadowMaterial")))
+	{
+		SetShadowMaterial(ShadowMaterial);
 	}
 
 	//return m_currRenderer->PostEditChangeProperty(PropertyChangedEvent);

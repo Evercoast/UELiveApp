@@ -2,7 +2,7 @@
 #include "Gaussian/EvercoastGaussianSplatPassthroughResult.h"
 #include "Gaussian/EvercoastGaussianSplatShadowCasterComp.h"
 
-FEvercoastGaussianSplatShadowingSceneProxy::FEvercoastGaussianSplatShadowingSceneProxy(const UEvercoastGaussianSplatShadowCasterComp* component, UMaterialInstanceDynamic* material) :
+FEvercoastGaussianSplatShadowingSceneProxy::FEvercoastGaussianSplatShadowingSceneProxy(const UEvercoastGaussianSplatShadowCasterComp* component, UMaterialInterface* material) :
 	FEvercoastGaussianSplatSceneProxy(component, material),
 	MaterialRelevance(component->GetMaterialRelevance(GetScene().GetFeatureLevel()))
 {

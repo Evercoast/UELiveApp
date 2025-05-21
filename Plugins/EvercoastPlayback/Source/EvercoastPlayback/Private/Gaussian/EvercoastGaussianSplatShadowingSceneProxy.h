@@ -19,7 +19,7 @@ class UMaterialInstanceDynamic;
 class FEvercoastGaussianSplatShadowingSceneProxy : public FEvercoastGaussianSplatSceneProxy
 {
 public:
-	FEvercoastGaussianSplatShadowingSceneProxy(const UEvercoastGaussianSplatShadowCasterComp* component, UMaterialInstanceDynamic* material);
+	FEvercoastGaussianSplatShadowingSceneProxy(const UEvercoastGaussianSplatShadowCasterComp* component, UMaterialInterface* material);
 	virtual ~FEvercoastGaussianSplatShadowingSceneProxy();
 
 	/** Return a type (or subtype) specific hash for sorting purposes */
