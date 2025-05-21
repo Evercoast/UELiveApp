@@ -391,13 +391,13 @@ void ALivePreviewPlayerController::UniformScaleTargetByMouseDelta(AActor* ScaleT
 		FVector currScale = newTransform.GetScale3D();
 		float newScaleScalar = currScale.X + Delta;
 		
-		if (newScaleScalar < 0.25f)
+		if (newScaleScalar < 0.5f)
 		{
-			newScaleScalar = 0.25f;
+			newScaleScalar = 0.5f;
 		}
-		if (newScaleScalar > 4.0f)
+		if (newScaleScalar > 1.5f)
 		{
-			newScaleScalar = 4.0f;
+			newScaleScalar = 1.5f;
 		}
 		
 		newTransform.SetScale3D(FVector(newScaleScalar, newScaleScalar, newScaleScalar));
