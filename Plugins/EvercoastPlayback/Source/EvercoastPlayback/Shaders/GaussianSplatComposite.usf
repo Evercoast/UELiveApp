@@ -1,0 +1,168 @@
+#include "/Engine/Public/Platform.ush"
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/SceneTexturesCommon.ush"
+
+Texture2D SplatInputColor;
+Texture2D SplatInputDepth;
+
+// SceneColor texture
+Texture2D OriginalSceneColor;
+// SceneDepth texture
+Texture2D OriginalSceneDepth;
+
+// This is the multiplier to scale Viewport UV (0..1) to current SceneColor & SceneDepth RT
+// ASSUME THEY ARE THE SAME...
+float2 SceneColorDepthUVScale;
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Depth injection
+// Pass 1
+SamplerState LinearClamp;
+Texture2D<float> SceneDepthTexture; // official PF_DepthStencil to resolve
+float4 SceneDepthSizeInvSize; // official depth map size and inverse size
+float4 ViewportSizeInvSize;
+
+
+struct VSOut
+{
+    float4 Pos : SV_POSITION;
+};
+
+// Pass 2 specific
+Texture2D<float> SplatDepthTexture; // splat depth R32F/R16F
+float4 SplatDepthSizeInvSize; // splats depth map size and inverse size
+Texture2D<float> SceneDepthTextureR32F; // R32F from ResolveDepthPS
+float2 SplatUVScale; // splat image may not occupy the whole render target
+
+struct PSOut
+{
+    float4 Color : SV_Target0; // dummy
+    float Depth : SV_Depth;
+};
+
+// Pass 1
+float4 ResolveDepthPS(VSOut In) : SV_Target
+{
+    // Calc UV as no UV passed from vertex
+    float2 UV = In.Pos.xy * SceneDepthSizeInvSize.zw;
+    float deviceZ = SceneDepthTexture.Sample(LinearClamp, UV).r;
+
+    // ignore output colour
+    return deviceZ.rrrr;
+}
+
+// Pass 2
+PSOut CompositeDepthPS(VSOut In)
+{
+    PSOut Output;
+    
+    // VSOut has no TEXCOORD0 semnatics, SV_POSITION is in screen space so calc UV here
+    float2 ScreenUV = In.Pos.xy * SceneDepthSizeInvSize.zw; // AddScreenPass uses scene depth texture's dimension as viewport, so this can be used to sample the "official" scene depth
+    
+    // SplatUVScale = actual render area / total rendertarget area
+    // So here we convert ScreenUV which is in SceneDepthMap's space, into SplatDepthMap's space
+    float2 SplatDepthUV = ScreenUV * SplatUVScale;
+    
+    // However there's more complication: In Unreal the actual rendering area is not identical to the viewport size, and viewport size is not identical to render target area
+    // Relationship: actual render area <= reported viewport area <= render target area
+    // Here we'll need to compensate the actual rendering area vs viewport size difference
+    
+    // SceneColorDepthUVScale = actual render area / reported viewport area 
+    // Impossible to get this parameter at this stage, so it is lagged one frame behind. Usually not a big deal
+    SplatDepthUV /= SceneColorDepthUVScale;
+   
+    
+    float sceneDepth = SceneDepthTextureR32F.Sample(LinearClamp, ScreenUV).r;
+    float splatDepth = SplatDepthTexture.Sample(LinearClamp, SplatDepthUV).r;
+
+    Output.Depth = max(sceneDepth, splatDepth);
+    Output.Color = 0; // dummy
+    
+    return Output;
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Pixel shader version of colour composition
+PSOut CompositeColourPS(VSOut In)
+{
+    PSOut Output;
+    
+    // VSOut has no TEXCOORD0 semnatics, SV_POSITION is in screen space so calc UV here
+    float2 UV = In.Pos.xy * ViewportSizeInvSize.zw;
+    
+    float2 ExistingColourDepthUV = UV * SceneColorDepthUVScale;
+    float2 SplatColourDepthUV = UV.xy * SplatUVScale;
+    
+    float4 ExistingColour = OriginalSceneColor.Sample(LinearClamp, ExistingColourDepthUV);
+    float ExistingDepth = LookupDeviceZ(ExistingColourDepthUV); // same UV as used for colour map
+    ///float ExistingDepth = OriginalSceneDepth.Sample(LinearClamp, ExistingColourDepthUV); // should be same as above
+    
+    float4 SplatColour = SplatInputColor.Sample(LinearClamp, SplatColourDepthUV);
+    float SplatDepth = SplatInputDepth.Sample(LinearClamp, SplatColourDepthUV) + 0.0001; // Ahhh the magic depth bias 
+
+    if (SplatDepth > ExistingDepth)
+    {
+        // Z test passes
+        
+        // Blend the splat colour as premultiplied alpha, because the way the tile renderer accumulates colour has essentially alpha premultiplied
+        // The sRGB->linear conversion in the splat colour map generation, for some reason, will have rgb exceeds [0, 1] range so clamp it here
+        float4 OutputColor = float4(clamp(SplatColour.rgb, 0, 1) + (1 - SplatColour.a) * ExistingColour.rgb, ExistingColour.a);
+
+        // Write output
+        Output.Color = OutputColor;
+    }
+    else
+    {
+        // Z test fails
+        Output.Color = ExistingColour;
+    }
+    
+    Output.Depth = ExistingDepth;
+    return Output;
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Pixel shader version of colour composition
+PSOut CompositeColourOverlayPS(VSOut In)
+{
+    PSOut Output;
+    
+    // VSOut has no TEXCOORD0 semnatics, SV_POSITION is in screen space so calc UV here
+    float2 UV = In.Pos.xy * ViewportSizeInvSize.zw;
+    
+    float2 ExistingColourDepthUV = UV * SceneColorDepthUVScale;
+    float2 SplatColourDepthUV = UV.xy * SplatUVScale;
+    
+    float4 ExistingColour = OriginalSceneColor.Sample(LinearClamp, ExistingColourDepthUV);
+    //float ExistingDepth = LookupDeviceZ(ExistingColourDepthUV); // same UV as used for colour map
+    float ExistingDepth = OriginalSceneDepth.Sample(LinearClamp, ExistingColourDepthUV); // should be same as above
+    
+    float4 SplatColour = SplatInputColor.Sample(LinearClamp, SplatColourDepthUV);
+    float SplatDepth = SplatInputDepth.Sample(LinearClamp, SplatColourDepthUV) + 0.0001; // Ahhh the magic depth bias 
+
+    if (SplatDepth > ExistingDepth)
+    {
+        // Z test passes
+        
+        // Blend the splat colour as premultiplied alpha, because the way the tile renderer accumulates colour has essentially alpha premultiplied
+        // The sRGB->linear conversion in the splat colour map generation, for some reason, will have rgb exceeds [0, 1] range so clamp it here
+        float4 OutputColor = float4(clamp(SplatColour.rgb, 0, 1) + (1 - SplatColour.a) * ExistingColour.rgb, ExistingColour.a);
+        
+        OutputColor = pow(OutputColor, 2.2);
+
+        // Write output
+        Output.Color = OutputColor;
+    }
+        else
+    {
+        // Z test fails
+        Output.Color = ExistingColour;
+    }
+        
+    Output.Depth = ExistingDepth;
+    return Output;
+}
+

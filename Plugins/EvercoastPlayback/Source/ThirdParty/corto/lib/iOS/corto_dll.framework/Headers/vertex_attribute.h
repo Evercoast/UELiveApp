@@ -24,6 +24,7 @@ If not, see <http://www.gnu.org/licenses/>.
  #include <algorithm>
 #include "cstream.h"
 #include "index_attribute.h"
+#include "SimpleString.h"
 
 namespace crt {
 
@@ -50,7 +51,7 @@ public:
 	//quantize and store as values
 	virtual void quantize(uint32_t nvert, const char *buffer) = 0;
 	//used by attributes which leverage other attributes (normals, for example)
-	virtual void preDelta(uint32_t /*nvert*/, uint32_t /*nface*/, std::map<std::string, VertexAttribute *> &/*attrs*/, IndexAttribute &/*index*/) {}
+	virtual void preDelta(uint32_t /*nvert*/, uint32_t /*nface*/, std::map<SimpleString, VertexAttribute *> &/*attrs*/, IndexAttribute &/*index*/) {}
 	//use parallelogram prediction or just diff from v0
 	virtual void deltaEncode(std::vector<Quad> &context) = 0;
 	//compress diffs and write to stream
@@ -61,7 +62,7 @@ public:
 	//use parallelogram prediction to recover values
 	virtual void deltaDecode(uint32_t nvert, std::vector<Face> &faces) = 0;
 	//use other attributes to estimate (normals for example)
-	virtual void postDelta(uint32_t /*nvert*/, uint32_t /*nface*/, std::map<std::string, VertexAttribute *> &/*attrs*/, IndexAttribute &/*index*/) {}
+	virtual void postDelta(uint32_t /*nvert*/, uint32_t /*nface*/, std::map<SimpleString, VertexAttribute *> &/*attrs*/, IndexAttribute &/*index*/) {}
 	//reverse quantization operations
 	virtual void dequantize(uint32_t nvert) = 0;
 };

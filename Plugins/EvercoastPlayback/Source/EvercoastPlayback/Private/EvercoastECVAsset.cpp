@@ -180,6 +180,23 @@ static FString NO_EXTERNAL_VIDEO_NEEDED("__NO_MP4__");
 bool UEvercoastECVAsset::_DoValidation(const FString& url)
 {
 	// create a reader and see the callback results
+	if (url.EndsWith(TEXT(".ply")))
+	{
+		IPlatformFile& FileManager = FPlatformFileManager::Get().GetPlatformFile();
+		FString fullPathURL;
+		bool isDataURLRelativePath = FPaths::IsRelative(url);
+		if (isDataURLRelativePath)
+		{
+			fullPathURL = FPaths::Combine(FPaths::ProjectDir(), url);
+			fullPathURL = FPaths::ConvertRelativePathToFull(fullPathURL);
+		}
+		else
+		{
+			fullPathURL = url;
+		}
+
+		return FileManager.FileExists(*fullPathURL);
+	}
 	auto reader = UGhostTreeFormatReader::Create(true, nullptr, 2048, GetTransientPackage());
 	bool ret = reader->ValidateLocation(url, 60.0);
 

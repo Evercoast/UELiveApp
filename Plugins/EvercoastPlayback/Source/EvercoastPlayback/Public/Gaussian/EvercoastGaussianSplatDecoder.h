@@ -24,51 +24,20 @@ struct ECSpzHeader
 class EvercoastGaussianSplatDecodeOption : public GenericDecodeOption
 {
 public:
-    EvercoastGaussianSplatDecodeOption(bool inPerformCPUDecoding) : bPerformCPUDecoding(inPerformCPUDecoding)
+    EvercoastGaussianSplatDecodeOption(bool inPerformCPUDecoding, bool inIsFromPLY) : bPerformCPUDecoding(inPerformCPUDecoding), bIsFromPLY(inIsFromPLY)
     {
 
     }
 
     bool bPerformCPUDecoding;
-};
-
-class EVERCOASTPLAYBACK_API EvercoastGaussianSplatDecodeResult : public GenericDecodeResult
-{
-public:
-    EvercoastGaussianSplatDecodeResult(bool success, double timestamp, int64_t index, 
-        uint32_t pointCount, uint32_t shDegree, uint32_t textureSize, float* inPositions, uint8_t* inColourAlphas, float* inFloatColourAlphas, 
-        float* inScales, float* inRotationQuats, uint32_t* inSHCoeffients_R, uint32_t* inSHCoeffients_G, uint32_t* inSHCoeffients_B);
-    virtual ~EvercoastGaussianSplatDecodeResult();
-
-    virtual DecodeResultType GetType() const override
-    {
-        return DecodeResultType::DRT_GaussianSplat;
-    }
-
-    virtual void InvalidateResult() override;
-
-    uint32_t pointCount;
-    uint32_t shDegree;
-    float positionScalar;
-    uint32_t textureSize;
-    uint32_t frameNumber;
-    float* positions;
-    //uint32_t* transformA;
-    uint8_t* colourAlphas;
-    float* floatColourAlphas;
-    float* scales;
-    float* rotationQuats;
-
-    uint32_t* shCoeffs_R;
-    uint32_t* shCoeffs_G;
-    uint32_t* shCoeffs_B;
-
+    bool bIsFromPLY;
 };
 
 class EVERCOASTPLAYBACK_API EvercoastGaussianSplatDecoder : public IGenericDecoder
 {
 public:
 	static std::shared_ptr< EvercoastGaussianSplatDecoder> Create();
+    EvercoastGaussianSplatDecoder();
 	virtual ~EvercoastGaussianSplatDecoder();
 
 	virtual DecoderType GetType() const override;
@@ -76,6 +45,10 @@ public:
 	virtual std::shared_ptr<GenericDecodeResult> TakeResult() override;
 
 private:
+#if PLATFORM_WINDOWS
+    bool DecodeMemoryStreamPLY(const uint8_t* stream, size_t stream_size, double timestamp, int64_t frameIndex, GenericDecodeOption* option);
+    bool DecodeMemoryStreamECSPZ(const uint8_t* stream, size_t stream_size, double timestamp, int64_t frameIndex, GenericDecodeOption* option);
+#endif
     std::shared_ptr<GenericDecodeResult> m_result;
 };
 

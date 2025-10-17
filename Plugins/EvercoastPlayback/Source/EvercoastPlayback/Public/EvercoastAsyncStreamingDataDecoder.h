@@ -121,11 +121,11 @@ private:
 	FEvercoastGenericDecodeThread* FindLeastJobWorker();
 
 	std::shared_ptr<IGenericDecoder> m_baseDecoder;
-	std::shared_ptr<IGenericDecoder> m_auxDecoder;
 
 	// threading
 	std::vector<FEvercoastGenericDecodeThread*> m_decodeWorkers;
 	std::vector<FRunnableThread*> m_decodeWorkerControllers;
+	FEvercoastGenericDecodeThread* m_stickyDecodeWorker; // "sticky" as mesh/image sequence decoder data packets comes in sequence, and mesh data needs to be cached before image comes in
 
 	ResultCache m_resultCache;
 	ResultPresorter* m_resultPresorter;
@@ -133,4 +133,5 @@ private:
 	double m_halfFrameInterval;
 
 	DecoderType m_decoderType;
+	DecoderType m_auxDecoderType;
 };

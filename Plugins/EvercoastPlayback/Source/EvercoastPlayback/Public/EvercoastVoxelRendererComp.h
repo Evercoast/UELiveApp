@@ -51,6 +51,12 @@ public:
 	// Allow user to provide their own normal render target, for outputting world normal purpose. Its dimension should be equal or smaller than GenerateWorldNormalSize
 	UPROPERTY(EditAnywhere, meta = (EditCondition = "bGenerateNormal"), Category = "Rendering")
 	UTextureRenderTarget2D* OverrideWorldNormalRenderTarget[2];
+
+	UPROPERTY(EditAnywhere, meta = (ClampMin = "0.0", ClampMax = "1.0"), BlueprintReadWrite, Category = "Rendering")
+	float EyeAdaptationCorrectionIntensity = 1.0f;
+
+	UPROPERTY(EditAnywhere, meta = (ClampMin = "0.0", ClampMax = "2.0"), BlueprintReadWrite, Category = "Rendering")
+	float PostEyeAdaptationCorrectionTexelEmission = 1.0f;
 public:
 	virtual std::shared_ptr<IEvercoastStreamingDataUploader> GetVoxelDataUploader() const override;
 	virtual void SetVoxelData(std::shared_ptr<EvercoastLocalVoxelFrame> localVoxelFrame) override;
@@ -107,10 +113,14 @@ private:
 
 	UPROPERTY(Transient)
 	UTextureRenderTarget2D* FilteredWorldNormalRenderTarget[2];
+
+	UPROPERTY(EditDefaultsOnly, Category = "Evercoast Playback")
+	bool bIsEyeAdaptationCorrectedMaterial = false;
 	
 	std::shared_ptr<IEvercoastStreamingDataUploader> m_voxelUploader;
 	std::shared_ptr<EvercoastLocalVoxelFrame> m_currLocalVoxelFrame;
 	bool m_dirtyMark;
 
-
+	void ApplyEyeAdaptationCorrectionMaterialParams();
+	void CheckEyeAdaptationCorrectionMaterialParams();
 };

@@ -2,6 +2,7 @@
 #include "EvercoastVoxelDecoder.h"
 #include "CortoWebpUnifiedDecodeResult.h"
 #include "Engine/Texture2D.h"
+#include "Engine/TextureRenderTarget2D.h"
 #include "TextureResource.h"
 #include "RenderingThread.h"
 
@@ -85,7 +86,8 @@ FBoxSphereBounds3f CortoLocalMeshFrame::GetBounds() const
 CortoLocalTextureFrame::CortoLocalTextureFrame(const CortoWebpUnifiedDecodeResult* pResult) :
     FGCObject(),
 	m_localTexture(nullptr),
-	m_needsSwizzle(false)
+	m_needsSwizzle(false),
+	m_pixelFormat(EPixelFormat::PF_Unknown)
 {
     UpdateTexture(pResult);
 }
@@ -147,7 +149,18 @@ void CortoLocalTextureFrame::UpdateTexture(const CortoWebpUnifiedDecodeResult* p
 				m_localTexture->ReleaseResource();
 				m_localTexture = nullptr;
 			}
-			m_localTexture = UTexture2D::CreateTransient(width, height, EPixelFormat::PF_B8G8R8A8);
+
+			// Follow whatever video texture's format
+			if (pResult->videoTextureResult->GetClass() == UTextureRenderTarget2D::StaticClass())
+			{
+				m_pixelFormat = ((UTextureRenderTarget2D*)(pResult->videoTextureResult))->GetFormat();
+			}
+			else
+			{
+				m_pixelFormat = ((UTexture2D*)(pResult->videoTextureResult))->GetPixelFormat();
+			}
+
+			m_localTexture = UTexture2D::CreateTransient(width, height, m_pixelFormat);
 			m_localTexture->UpdateResource();
 		}
 

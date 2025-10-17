@@ -80,6 +80,7 @@ public:
 	bool IsMeshData() const;
 	bool IsMeshDataWithNormal() const;
 	bool MeshRequiresExternalData() const;
+	bool IsGaussianSplatData() const;
 	bool IsInSeeking() const;
 	float GetCurrentTimestamp() const;
 	float GetDuration() const;
@@ -249,6 +250,7 @@ private:
 	std::recursive_mutex m_readerLock;
 	bool m_isMesh;
 	bool m_isMeshWithNormals;
+	bool m_isGaussianSplats;
 
 	uint32_t						m_mainChannelId;
 	uint32_t						m_mainChannelSampleRate;

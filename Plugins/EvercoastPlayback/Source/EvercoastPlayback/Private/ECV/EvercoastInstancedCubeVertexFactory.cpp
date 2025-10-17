@@ -87,7 +87,15 @@ IMPLEMENT_VERTEX_FACTORY_PARAMETER_TYPE(FEvercoastInstancedCubeVertexFactory, SF
 
 #if ENGINE_MAJOR_VERSION >= 5
 
-#if ENGINE_MINOR_VERSION >= 4
+#if ENGINE_MINOR_VERSION >= 5
+IMPLEMENT_VERTEX_FACTORY_TYPE(FEvercoastInstancedCubeVertexFactory, "/EvercoastShaders/EvercoastLocalVertexFactory_5_5.ush",
+	EVertexFactoryFlags::UsedWithMaterials
+	| EVertexFactoryFlags::SupportsDynamicLighting
+	| EVertexFactoryFlags::SupportsPrecisePrevWorldPos
+	| EVertexFactoryFlags::SupportsPositionOnly
+);
+
+#elif ENGINE_MINOR_VERSION >= 4
 IMPLEMENT_VERTEX_FACTORY_TYPE(FEvercoastInstancedCubeVertexFactory, "/EvercoastShaders/EvercoastLocalVertexFactory_5_4.ush",
 	EVertexFactoryFlags::UsedWithMaterials
 	| EVertexFactoryFlags::SupportsDynamicLighting

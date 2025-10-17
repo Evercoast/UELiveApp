@@ -1,0 +1,144 @@
+#include "/Engine/Public/Platform.ush"
+#if SM6_PROFILE
+
+#include "/Engine/Private/Common.ush"
+
+// GaussianSplatData type
+#include "GaussianSplatTypes.ush"
+#include "GaussianSplatConstants.ush"
+#include "GaussianSplatCommon.ush"
+
+uint SplatCount;
+float4 VecScreenParams;
+///////////////////////
+// SORTING INTERMEDIATE
+uint NumTileConjugateSplat; // Num of tiles rendered by all Gaussians. Note this should have range of [0, SplatCount * TileCountX * TileCountY] 
+// so in theory can be preinitialized, but imagine a 4K(4096x2160) image by 16x16 tiles would result in 34560 tiles then multiply 1M splats will give 34G tile related elements(out of memory for most GPU)
+// As a result, the value of NumTileConjugateSplat is the last element of TileConjugateSplatOffsetBuffer, read out to CPU, allocate the following 4 buffers, then set back to GPU
+
+// CSDuplicateWithKeys buffers
+StructuredBuffer<SplatViewData> TheSplatViewData;
+StructuredBuffer<uint> TileConjugateSplatOffsetBuffer; // Calculated inclusive sum of SplatViewData.tiles_touched, from the natural splat array(SplatViewData), Size = SplatCount
+RWStructuredBuffer<uint> TileConjugateSplatKeys;         // key = (tile_ID | depth) ,size = NumTileConjugateSplat (of TILES by ALL GAUSSIANS), 64-bit squeezed into 32-bit, needs CPU resize
+RWStructuredBuffer<uint> TileConjugateSplatValues;       // value = splat_index(index of TheSplatViewData), size = NumTileConjugateSplat (of TILES by ALL GAUSSIANS), 32-bit, needs CPU resize
+
+// CSIdentifyTileRanges buffers
+StructuredBuffer<uint> TileConjugateSplatKeysSorted;
+RWStructuredBuffer<uint2> TileToSplatRanges; // Size = (TileCountX * TileCountY), range of splats idx
+
+// Dispatch 2
+[numthreads(DUPLICATE_KEY_THREADS, 1, 1)]
+void CSDuplicateWithKeys(uint3 groupID : SV_GroupID,
+            uint3 threadIDInGroup : SV_GroupThreadID,
+            uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    // Dataflow: point_offset -> point_list_keys_unsorted + point_list_unsorted
+    // For each instance to be rendered, produce adequate [ tile_id | depth ] key 
+	// and corresponding duplicated Gaussian indices to be sorted
+    
+    uint splatIdx = dispatchThreadID.x;
+    if (splatIdx >= SplatCount)
+        return;
+    
+    uint offset = (splatIdx == 0) ? 0 : TileConjugateSplatOffsetBuffer[splatIdx - 1];
+    
+    
+    // TODO: precompute
+    uint W = (uint) VecScreenParams.x;
+    uint H = (uint) VecScreenParams.y;
+    uint horizontal_tile_count = (W + TILE_SIZE - 1) / TILE_SIZE; // RoundUp(W / TileSize)
+    uint vertical_tile_count = (H + TILE_SIZE - 1) / TILE_SIZE; // RoundUp(W / TileSize)
+    
+    int2 tileRangeMin, tileRangeMax;
+    tileRangeMin = TheSplatViewData[splatIdx].tile_idx_ranges.xy;
+    tileRangeMax = TheSplatViewData[splatIdx].tile_idx_ranges.zw;
+
+    
+    // For each tile that the bounding rect overlaps, emit a 
+	// key/value pair. The key is |  tile ID  |      depth      |,
+	// and the value is the ID of the Gaussian. Sorting the values 
+	// with this key yields Gaussian IDs in a list, such that they
+	// are first sorted by tile and then by depth. 
+	// (The Gaussian ID could be duplicated/non-unique)
+    for (int y = tileRangeMin.y; y < tileRangeMax.y; y++)
+    {
+        for (int x = tileRangeMin.x; x < tileRangeMax.x; x++)
+        {
+            // Make 16bit key
+            uint key = y * horizontal_tile_count + x;
+            key &= 0x0000FFFF;
+            // Move to high bits
+            key <<= 16;
+            // Bit or with 16bit depth
+            //key |= _SplatUint16DepthBuffer[splatIdx];
+            key |= TheSplatViewData[splatIdx].depth16;
+            
+            TileConjugateSplatKeys[offset] = key;
+            TileConjugateSplatValues[offset] = splatIdx;
+            
+            offset++;
+        }
+    }
+    
+}
+
+uint GetSortedKey(uint tileConjugateSplatIndex)
+{
+    return TileConjugateSplatKeysSorted[tileConjugateSplatIndex];
+}
+
+
+// Dispatch 4
+[numthreads(FIND_RANGE_THREADS, 1, 1)]
+void CSIdentifyTileRanges(uint3 groupID : SV_GroupID,
+            uint3 threadIDInGroup : SV_GroupThreadID,
+            uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    // Dataflow: point_list_keys_sorted -> TileToSplatRanges
+    // Identify start and end of per-tile workloads in sorted list
+    
+    uint tileConjugateSplatIdx = dispatchThreadID.x;
+    if (tileConjugateSplatIdx >= NumTileConjugateSplat)
+        return;
+    
+    // Read tile ID from key. Update start/end of tile range if at limit.
+    uint key = GetSortedKey(tileConjugateSplatIdx);
+    uint currtile = key >> 16;
+    
+    if (tileConjugateSplatIdx == 0)
+    {
+        TileToSplatRanges[currtile].x = 0;
+    }
+    else
+    {
+        uint prevtile = GetSortedKey(tileConjugateSplatIdx - 1) >> 16;
+        if (currtile != prevtile)
+        {
+            TileToSplatRanges[prevtile].y = tileConjugateSplatIdx;
+            TileToSplatRanges[currtile].x = tileConjugateSplatIdx;
+        }
+        
+        if (tileConjugateSplatIdx == NumTileConjugateSplat - 1)
+        {
+            TileToSplatRanges[currtile].y = NumTileConjugateSplat;
+        }
+
+    }
+}
+#else
+// Dummy
+[numthreads(1, 1, 1)]
+void CSDuplicateWithKeys(uint3 groupID : SV_GroupID,
+            uint3 threadIDInGroup : SV_GroupThreadID,
+            uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+}
+
+[numthreads(1, 1, 1)]
+void CSIdentifyTileRanges(uint3 groupID : SV_GroupID,
+            uint3 threadIDInGroup : SV_GroupThreadID,
+            uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+}
+
+#endif

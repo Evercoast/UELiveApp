@@ -15,6 +15,8 @@ UEvercoastECVAssetFactory::UEvercoastECVAssetFactory(const FObjectInitializer& O
 {
 	Formats.Add(FString(TEXT("ecv;")) + NSLOCTEXT("EvercoastText", "FormatECV", "Evercoast ECV File").ToString());
 	Formats.Add(FString(TEXT("ecm;")) + NSLOCTEXT("EvercoastText", "FormatECM", "Evercoast ECM File").ToString());
+	Formats.Add(FString(TEXT("ecz;")) + NSLOCTEXT("EvercoastText", "FormatECZ", "Evercoast ECZ File").ToString());
+	Formats.Add(FString(TEXT("ply;")) + NSLOCTEXT("PLY", "FormatPLY", "Gaussian Splats PLY File").ToString());
 	SupportedClass = UEvercoastECVAsset::StaticClass();
 	bCreateNew = false;
 	bEditorImport = true;

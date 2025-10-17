@@ -25,11 +25,11 @@ public:
 	{
 #if ENGINE_MAJOR_VERSION == 5
 #if ENGINE_MINOR_VERSION >= 1
-		FRHIResourceCreateInfo CreateInfo(TEXT("FGenericDepthTarget"), FClearValueBinding(0, 1));
+		FRHIResourceCreateInfo CreateInfo(TEXT("FGenericDepthTarget"));
 		FRHITextureCreateDesc desc = FRHITextureCreateDesc::Create2D(CreateInfo.DebugName, Width, Height, EPixelFormat::PF_DepthStencil)
 			.SetNumMips(1).SetNumSamples(1)
 			.SetFlags(ETextureCreateFlags::DepthStencilTargetable | ETextureCreateFlags::Dynamic)
-			.SetClearValue(CreateInfo.ClearValueBinding);
+			.SetClearValue(FClearValueBinding(0, 1));
 		DepthTextureRHI = RHICreateTexture(desc);
 #else
 		FRHIResourceCreateInfo CreateInfo(TEXT("FGenericDepthTarget"), FClearValueBinding(0, 1));
@@ -60,7 +60,7 @@ public:
 		RHICreationFuture.get();
 	}
 
-	FTexture2DRHIRef DepthTextureRHI;
+	FTextureRHIRef DepthTextureRHI;
 
 private:
 	int32 Width = 1024;
@@ -90,18 +90,19 @@ public:
 #endif
 	{
 #if ENGINE_MAJOR_VERSION == 5
-		FRHIResourceCreateInfo CreateInfo(TEXT("FFlipFilterRenderTarget"), FClearValueBinding(FLinearColor(0, 1, 0, 1)));
+		FRHIResourceCreateInfo CreateInfo(TEXT("FFlipFilterRenderTarget"));
 #if ENGINE_MINOR_VERSION >= 1
 		for (int i = 0; i < 2; ++i)
 		{
 			FRHITextureCreateDesc desc = FRHITextureCreateDesc::Create2D(CreateInfo.DebugName, Width, Height, PixelFormat)
 				.SetNumMips(1).SetNumSamples(1)
 				.SetFlags(ETextureCreateFlags::RenderTargetable | ETextureCreateFlags::Dynamic)
-				.SetClearValue(CreateInfo.ClearValueBinding);
+				.SetClearValue(FClearValueBinding(FLinearColor(0, 1, 0, 1)));
 
 			FlipTargets[i] = RHICreateTexture(desc);
 		}
 #else
+		FRHIResourceCreateInfo CreateInfo(TEXT("FFlipFilterRenderTarget"), FClearValueBinding(FLinearColor(0, 1, 0, 1)));
 		for (int i = 0; i < 2; ++i)
 		{
 			FlipTargets[i] = RHICreateTexture2D(Width, Height,
@@ -132,7 +133,7 @@ public:
 		}
 	}
 
-	FTexture2DRHIRef GetFilterTarget(int i)
+	FTextureRHIRef GetFilterTarget(int i)
 	{
 		return FlipTargets[i];
 	}
@@ -175,15 +176,15 @@ public:
 	}
 
 private:
-	static void DoFilter_Horizontal(const FTexture2DRHIRef& SourceTextureRHI, const FTexture2DRHIRef& DestinationTextureRHI, FRHICommandListImmediate& RHICmdList, IRendererModule* RendererModule);
-	static void DoFilter_Vertical(const FTexture2DRHIRef& SourceTextureRHI, const FTexture2DRHIRef& DestinationTextureRHI, FRHICommandListImmediate& RHICmdList, IRendererModule* RendererModule);
-	static void DoFilter_CopyThrough(const FTexture2DRHIRef& SourceTextureRHI, const FTexture2DRHIRef& DestinationTextureRHI, FRHICommandListImmediate& RHICmdList, IRendererModule* RendererModule);
+	static void DoFilter_Horizontal(const FTextureRHIRef& SourceTextureRHI, const FTextureRHIRef& DestinationTextureRHI, FRHICommandListImmediate& RHICmdList, IRendererModule* RendererModule);
+	static void DoFilter_Vertical(const FTextureRHIRef& SourceTextureRHI, const FTextureRHIRef& DestinationTextureRHI, FRHICommandListImmediate& RHICmdList, IRendererModule* RendererModule);
+	static void DoFilter_CopyThrough(const FTextureRHIRef& SourceTextureRHI, const FTextureRHIRef& DestinationTextureRHI, FRHICommandListImmediate& RHICmdList, IRendererModule* RendererModule);
 
 	int32 Width = 1024;
 	int32 Height = 1024;
 	EPixelFormat PixelFormat = EPixelFormat::PF_FloatRGBA;
 
-	FTexture2DRHIRef FlipTargets[2] = { nullptr, nullptr };
+	FTextureRHIRef FlipTargets[2] = { nullptr, nullptr };
 	std::promise<void> RHICreationPromise;
 	std::future<void> RHICreationFuture;
 };

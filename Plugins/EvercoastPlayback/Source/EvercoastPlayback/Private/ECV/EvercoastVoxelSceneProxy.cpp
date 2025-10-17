@@ -322,8 +322,8 @@ void FEvercoastVoxelSceneProxy::RenderWorldNormal_RenderThread(const FTexture& D
 	FMatrix ObjectToCamera, FMatrix CameraToWorld, FMatrix ObjectToProjection, std::shared_ptr<EvercoastLocalVoxelFrame> voxelFrame, FRHICommandListImmediate& RHICmdList)
 {
 
-	const FTexture2DRHIRef& DestinationTextureRHI = DestTexture.TextureRHI->GetTexture2D();
-	const FTexture2DRHIRef& DestinationDepthTextureRHI = NormalRender_DepthTarget->DepthTextureRHI;
+	const FTextureRHIRef& DestinationTextureRHI = DestTexture.TextureRHI->GetTexture2D();
+	const FTextureRHIRef& DestinationDepthTextureRHI = NormalRender_DepthTarget->DepthTextureRHI;
 
 	// Need this for Vulkan
 	RHICmdList.Transition(FRHITransitionInfo(DestinationTextureRHI, ERHIAccess::SRVMask, ERHIAccess::RTV));
@@ -553,6 +553,61 @@ void FEvercoastVoxelSceneProxy::GetDynamicMeshElements(
 }
 
 #if RHI_RAYTRACING
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 5
+void FEvercoastVoxelSceneProxy::GetDynamicRayTracingInstances(FRayTracingInstanceCollector& Collector)
+{
+	if (!Material)
+		return;
+
+	FMaterialRenderProxy* MaterialProxy = Material->GetRenderProxy();
+
+	if (RayTracingGeometry.GetRHI()->IsValid())
+	{
+		check(RayTracingGeometry.Initializer.IndexBuffer.IsValid());
+
+		FRayTracingInstance RayTracingInstance;
+		RayTracingInstance.Geometry = &RayTracingGeometry;
+		RayTracingInstance.InstanceTransforms.Add(GetLocalToWorld());
+
+		uint32 SectionIdx = 0;
+		FMeshBatch MeshBatch;
+
+		MeshBatch.VertexFactory = &VertexFactory_CubeMesh;
+		MeshBatch.SegmentIndex = 0;
+		MeshBatch.MaterialRenderProxy = Material->GetRenderProxy();
+		MeshBatch.ReverseCulling = IsLocalToWorldDeterminantNegative();
+		MeshBatch.Type = PT_TriangleList;
+		MeshBatch.DepthPriorityGroup = SDPG_World;
+		MeshBatch.bCanApplyViewModeOverrides = false;
+		MeshBatch.CastRayTracedShadow = IsShadowCast(Collector.GetReferenceView());
+
+		FMeshBatchElement& BatchElement = MeshBatch.Elements[0];
+		BatchElement.IndexBuffer = &IndexBuffer_Cube;
+
+		bool bHasPrecomputedVolumetricLightmap;
+		FMatrix PreviousLocalToWorld;
+		int32 SingleCaptureIndex;
+		bool bOutputVelocity;
+		GetScene().GetPrimitiveUniformShaderParameters_RenderThread(GetPrimitiveSceneInfo(), bHasPrecomputedVolumetricLightmap, PreviousLocalToWorld, SingleCaptureIndex, bOutputVelocity);
+
+		FDynamicPrimitiveUniformBuffer& DynamicPrimitiveUniformBuffer = Collector.AllocateOneFrameResource<FDynamicPrimitiveUniformBuffer>();
+		FRHICommandListBase& RHICmdList = FRHICommandListImmediate::Get();
+		DynamicPrimitiveUniformBuffer.Set(RHICmdList, GetLocalToWorld(), PreviousLocalToWorld, GetBounds(), GetLocalBounds(), GetLocalBounds(), true, bHasPrecomputedVolumetricLightmap, bOutputVelocity, GetCustomPrimitiveData());
+		BatchElement.PrimitiveUniformBufferResource = &DynamicPrimitiveUniformBuffer.UniformBuffer;
+
+		BatchElement.FirstIndex = 0;
+		BatchElement.NumPrimitives = IndexBuffer_Cube.Indices.Num() / 3;
+		BatchElement.MinVertexIndex = 0;
+		BatchElement.MaxVertexIndex = VertexBuffers_Cube.PositionVertexBuffer.GetNumVertices() - 1;
+
+		RayTracingInstance.Materials.Add(MeshBatch);
+
+		Collector.AddRayTracingInstance(RayTracingInstance);
+	}
+}
+#else
+
 void FEvercoastVoxelSceneProxy::GetDynamicRayTracingInstances(FRayTracingMaterialGatheringContext& Context, TArray<FRayTracingInstance>& OutRayTracingInstances)
 {
 	if (!Material)
@@ -625,6 +680,8 @@ void FEvercoastVoxelSceneProxy::GetDynamicRayTracingInstances(FRayTracingMateria
 		OutRayTracingInstances.Add(RayTracingInstance);
 	}
 }
+#endif
+
 #endif
 
 uint32 FEvercoastVoxelSceneProxy::GetMemoryFootprint() const

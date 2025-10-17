@@ -7,7 +7,7 @@
 #include "WebpDecoder.h"
 #include "CortoWebpUnifiedDecodeResult.h"
 #include "Gaussian/EvercoastGaussianSplatDecoder.h"
-#include "Gaussian/EvercoastGaussianSplatPassthroughResult.h"
+#include "Gaussian/EvercoastGaussianSplatCSResult.h"
 #include "HAL/Runnable.h"
 #include "HAL/RunnableThread.h"
 #include "EvercoastPlaybackUtils.h"
@@ -343,8 +343,8 @@ void EvercoastAsyncStreamingDataDecoder::ResultPresorter::Add(std::shared_ptr<Ge
 {
 	std::lock_guard<std::recursive_mutex> guard(m_mutex);
 
-	// first delivery
-	if (m_lastDeliveredTimestamp < 0 && result->frameTimestamp == 0.0)
+	// first delivery, let's ignore the first frame condition FOR NOW because we want the sequencer to work 
+	if (m_lastDeliveredTimestamp < 0)
 	{
 		// Can force deliver the first frame
 		ForceDeliver(result);
@@ -425,6 +425,8 @@ void EvercoastAsyncStreamingDataDecoder::ResultPresorter::CleanupPresortedResult
 
 void EvercoastAsyncStreamingDataDecoder::ResultPresorter::Dispose()
 {
+	std::lock_guard<std::recursive_mutex> guard(m_mutex);
+
 	m_resultCache.Dispose();
 
 	CleanupPresortedResults();
@@ -432,6 +434,8 @@ void EvercoastAsyncStreamingDataDecoder::ResultPresorter::Dispose()
 
 void EvercoastAsyncStreamingDataDecoder::ResultPresorter::DisposeAndReinit()
 {
+	std::lock_guard<std::recursive_mutex> guard(m_mutex);
+
 	m_resultCache.DisposeAndReinit();
 
 	CleanupPresortedResults();
@@ -440,9 +444,9 @@ void EvercoastAsyncStreamingDataDecoder::ResultPresorter::DisposeAndReinit()
 class EvercoastSpzDecodeThread final : public FEvercoastGenericDecodeThread
 {
 public:
-	EvercoastSpzDecodeThread(std::shared_ptr<IGenericDecoder> decoder, EvercoastAsyncStreamingDataDecoder::ResultPresorter& resultPresorter) :
+	EvercoastSpzDecodeThread(std::shared_ptr<IGenericDecoder> decoder, EvercoastAsyncStreamingDataDecoder::ResultPresorter& resultPresorter, bool bIsPLYFormat) :
 		m_baseDecoder(decoder), m_running(false),
-		m_resultPresorter(resultPresorter)
+		m_resultPresorter(resultPresorter), m_isPLYFormat(bIsPLYFormat)
 	{
 	}
 
@@ -479,34 +483,25 @@ public:
 					dataFrame = m_localDataFrameList.front();
 					m_localDataFrameList.pop();
 
-					UE_LOG(EvercoastVoxelDecoderLog, Verbose, TEXT("SpzDecodeThread::Run HasNewEntry time: %.2f, Input Ring size: %d"), dataFrame->m_timestamp, m_localDataFrameList.size());
+					UE_LOG(EvercoastVoxelDecoderLog, Verbose, TEXT("SpzDecodeThread::Run HasNewEntry frame %d, Input Ring size: %d"), dataFrame->m_frameIndex, m_localDataFrameList.size());
 				}
-			}
 
-			if (dataFrame)
-			{
-#if 0
-				EvercoastGaussianSplatDecodeOption decodeOption(true);
-				if (m_baseDecoder->DecodeMemoryStream(dataFrame->m_data, dataFrame->m_dataSize, dataFrame->m_timestamp, dataFrame->m_frameIndex, &decodeOption))
+				if (dataFrame)
 				{
-					auto result = m_baseDecoder->TakeResult();
-					auto pResult = std::static_pointer_cast<EvercoastGaussianSplatDecodeResult>(result);
+					EvercoastGaussianSplatDecodeOption decodeOption(false, m_isPLYFormat);
+					if (m_baseDecoder->DecodeMemoryStream(dataFrame->m_data, dataFrame->m_dataSize, dataFrame->m_timestamp, dataFrame->m_frameIndex, &decodeOption))
+					{
+						auto result = m_baseDecoder->TakeResult();
+						auto pResult = std::static_pointer_cast<EvercoastGaussianSplatCSResult>(result);
 
-					m_resultPresorter.Add(pResult);
-				}
-#else
-				EvercoastGaussianSplatDecodeOption decodeOption(false);
-				if (m_baseDecoder->DecodeMemoryStream(dataFrame->m_data, dataFrame->m_dataSize, dataFrame->m_timestamp, dataFrame->m_frameIndex, &decodeOption))
-				{
-					auto result = m_baseDecoder->TakeResult();
-					auto pResult = std::static_pointer_cast<EvercoastGaussianSplatPassthroughResult>(result);
+						m_resultPresorter.Add(pResult);
 
-					m_resultPresorter.Add(pResult);
-				}
-#endif
-				else
-				{
-					UE_LOG(EvercoastVoxelDecoderLog, Warning, TEXT("Decode Gaussian failed"));
+						UE_LOG(EvercoastVoxelDecoderLog, Verbose, TEXT("SpzDecodeThread::Run() Decoded frame: %d size: %d"), dataFrame->m_frameIndex, dataFrame->m_dataSize);
+					}
+					else
+					{
+						UE_LOG(EvercoastVoxelDecoderLog, Warning, TEXT("Decode Gaussian failed"));
+					}
 				}
 			}
 
@@ -520,14 +515,20 @@ public:
 	void Stop() override
 	{
 		std::lock_guard<std::recursive_mutex> guard(m_controllerMutex);
+		// I have to add input lock to avoid thread being stopped before finishing Run()
+		std::lock_guard<std::recursive_mutex> guardInput(m_inputMutex);
 		m_running = false;
 
 		m_newEntrySemaphore.release();
+
+		UE_LOG(EvercoastVoxelDecoderLog, Verbose, TEXT("EvercoastSpzDecodeThread: %p Stopped decoder obj: %p"), this, this->m_baseDecoder.get());
 	}
 
 	void Exit() override
 	{
 		m_resultPresorter.Dispose();
+
+		UE_LOG(EvercoastVoxelDecoderLog, Verbose, TEXT("EvercoastSpzDecodeThread: %p Exited decoder obj: %p"), this, this->m_baseDecoder.get());
 	}
 
 	bool HasNewEntry() const
@@ -572,9 +573,6 @@ public:
 		while (!m_localDataFrameList.empty())
 			m_localDataFrameList.pop();
 
-		// drain output cache
-		m_resultPresorter.DisposeAndReinit();
-
 	}
 
 private:
@@ -588,6 +586,7 @@ private:
 
 	CountingSemaphore m_newEntrySemaphore;
 	EvercoastAsyncStreamingDataDecoder::ResultPresorter& m_resultPresorter;
+	bool m_isPLYFormat;
 };
 
 // An asynchronised decode thread but no control over what timestamp the frame it can get
@@ -634,31 +633,31 @@ public:
 			std::shared_ptr<EvercoastEncodedDataFrame> dataFrame;
 			{
 				std::lock_guard<std::recursive_mutex> guardInput(m_inputMutex);
-			
+
 				if (HasNewEntry())
 				{
 					UE_LOG(EvercoastVoxelDecoderLog, Verbose, TEXT("Decode: Input Ring size: %d"), m_localDataFrameList.size());
 					dataFrame = m_localDataFrameList.front();
 					m_localDataFrameList.pop();
 				}
-			}
 
-			if (dataFrame)
-			{
-				EvercoastVoxelDecodeOption option(m_baseDefinition);
-				if (m_baseDecoder->DecodeMemoryStream(dataFrame->m_data, dataFrame->m_dataSize, dataFrame->m_timestamp, dataFrame->m_frameIndex, &option))
+				if (dataFrame)
 				{
-					auto result = m_baseDecoder->TakeResult();
-					auto pResult = std::static_pointer_cast<EvercoastVoxelDecodeResult>(result);
-					check(pResult->resultFrame);
+					EvercoastVoxelDecodeOption option(m_baseDefinition);
+					if (m_baseDecoder->DecodeMemoryStream(dataFrame->m_data, dataFrame->m_dataSize, dataFrame->m_timestamp, dataFrame->m_frameIndex, &option))
+					{
+						auto result = m_baseDecoder->TakeResult();
+						auto pResult = std::static_pointer_cast<EvercoastVoxelDecodeResult>(result);
+						check(pResult->resultFrame);
 
-					m_resultPresorter.Add(pResult);
-				}
-				else
-				{
-					UE_LOG(EvercoastVoxelDecoderLog, Warning, TEXT("Decode voxel failed"));
-				}
+						m_resultPresorter.Add(pResult);
+					}
+					else
+					{
+						UE_LOG(EvercoastVoxelDecoderLog, Warning, TEXT("Decode voxel failed"));
+					}
 
+				}
 			}
 
 
@@ -677,7 +676,6 @@ public:
 
 	void Exit() override
 	{
-		m_resultPresorter.Dispose();
 	}
 
 	bool HasNewEntry() const
@@ -725,9 +723,6 @@ public:
 		// deplete input buffer
 		while(!m_localDataFrameList.empty())
 			m_localDataFrameList.pop();
-
-		// drain output cache
-		m_resultPresorter.DisposeAndReinit();
 	}
 
 private:
@@ -818,121 +813,60 @@ public:
 						dataFrame = nullptr;
 					}
 				}
-			}
-			
 
-			CortoDecodeOption option;
-			if (dataFrame)
-			{
-				// FIXME: preallocate and reuse buffers!
-				std::shared_ptr<CortoWebpUnifiedDecodeResult> unifiedResult = std::make_shared<CortoWebpUnifiedDecodeResult>(
-					CortoDecoder::DEFAULT_VERTEX_COUNT, CortoDecoder::DEFAULT_TRIANGLE_COUNT, 1024, 1024, 32);
-
-				m_cortoDecoder->SetReceivingResult(std::move(unifiedResult->meshResult));
-				bool requireImageDecoding = !m_requiresExternalData;
-				if (requireImageDecoding)
+				CortoDecodeOption option;
+				if (dataFrame)
 				{
-					if (m_webpDecoder)
-						m_webpDecoder->SetReceivingResult(std::move(unifiedResult->imgResult));
-
-					if (m_cortoDecoder->DecodeMemoryStream(dataFrame->m_data, dataFrame->m_dataSize, dataFrame->m_timestamp, dataFrame->m_frameIndex, &option) &&
-						m_webpDecoder->DecodeMemoryStream(dataFrame->m_imageData, dataFrame->m_imageDataSize, dataFrame->m_timestamp, dataFrame->m_frameIndex, &option))
-					{
-						unifiedResult->meshResult = std::static_pointer_cast<CortoDecodeResult>(m_cortoDecoder->TakeResult());
-						unifiedResult->imgResult = std::static_pointer_cast<WebpDecodeResult>(m_webpDecoder->TakeResult());
-						unifiedResult->SyncWithMeshResult();
-
-						m_resultPresorter.Add(unifiedResult);
-					}
-					else
-					{
-						UE_LOG(EvercoastVoxelDecoderLog, Warning, TEXT("Decode mesh+image failed"));
-						m_cortoDecoder->UnsetReceivingResult();
-						if (m_webpDecoder)
-							m_webpDecoder->UnsetReceivingResult();
-
-					}
-				}
-				else
-				{
-					if (m_cortoDecoder->DecodeMemoryStream(dataFrame->m_data, dataFrame->m_dataSize, dataFrame->m_timestamp, dataFrame->m_frameIndex, &option))
-					{
-						unifiedResult->meshResult = std::static_pointer_cast<CortoDecodeResult>(m_cortoDecoder->TakeResult());
-						unifiedResult->SyncWithMeshResult();
-						
-						m_resultPresorter.Add(unifiedResult);
-					}
-					else
-					{
-						UE_LOG(EvercoastVoxelDecoderLog, Warning, TEXT("Decode mesh failed"));
-
-						m_cortoDecoder->UnsetReceivingResult();
-					}
-				}
-
-
-
-				dataFrame->Invalidate();
-
-
-				/*
-				// The cache needs to be frozen, no more cursor moving or content changing
-				m_resultCache.Lock();
-				std::shared_ptr<CortoWebpUnifiedDecodeResult> unifiedResult = std::static_pointer_cast<CortoWebpUnifiedDecodeResult>(m_resultCache.Prealloc());
-				if (!unifiedResult)
-				{
-					unifiedResult = std::make_shared<CortoWebpUnifiedDecodeResult>(
+					// FIXME: preallocate and reuse buffers!
+					std::shared_ptr<CortoWebpUnifiedDecodeResult> unifiedResult = std::make_shared<CortoWebpUnifiedDecodeResult>(
 						CortoDecoder::DEFAULT_VERTEX_COUNT, CortoDecoder::DEFAULT_TRIANGLE_COUNT, 1024, 1024, 32);
 
-					m_resultCache.FillLastPrealloc(unifiedResult);
-				}
-
-				m_cortoDecoder->SetReceivingResult(std::move(unifiedResult->meshResult));
-
-				bool requireImageDecoding = !m_requiresExternalData;
-				if (requireImageDecoding)
-				{
-					if (m_webpDecoder)
-						m_webpDecoder->SetReceivingResult(std::move(unifiedResult->imgResult));
-
-					if (m_cortoDecoder->DecodeMemoryStream(dataFrame->m_data, dataFrame->m_dataSize, dataFrame->m_timestamp, dataFrame->m_frameIndex, &option) &&
-						m_webpDecoder->DecodeMemoryStream(dataFrame->m_imageData, dataFrame->m_imageDataSize, dataFrame->m_timestamp, dataFrame->m_frameIndex, &option))
+					m_cortoDecoder->SetReceivingResult(std::move(unifiedResult->meshResult));
+					bool requireImageDecoding = !m_requiresExternalData;
+					if (requireImageDecoding)
 					{
-						unifiedResult->meshResult = std::static_pointer_cast<CortoDecodeResult>(m_cortoDecoder->TakeResult());
-						unifiedResult->imgResult = std::static_pointer_cast<WebpDecodeResult>(m_webpDecoder->TakeResult());
-						unifiedResult->SyncWithMeshResult();
-							
-						// No need to add to result cache, unifiedResult was preallocated
-					}
-					else
-					{
-						UE_LOG(EvercoastVoxelDecoderLog, Warning, TEXT("Decode mesh+image failed"));
-						m_cortoDecoder->UnsetReceivingResult();
 						if (m_webpDecoder)
-							m_webpDecoder->UnsetReceivingResult();
+							m_webpDecoder->SetReceivingResult(std::move(unifiedResult->imgResult));
 
-					}
-				}
-				else
-				{
-					if (m_cortoDecoder->DecodeMemoryStream(dataFrame->m_data, dataFrame->m_dataSize, dataFrame->m_timestamp, dataFrame->m_frameIndex, &option))
-					{
-						unifiedResult->meshResult = std::static_pointer_cast<CortoDecodeResult>(m_cortoDecoder->TakeResult());
-						unifiedResult->SyncWithMeshResult();
-						// No need to add to result cache, unifiedResult was preallocated
+						if (m_cortoDecoder->DecodeMemoryStream(dataFrame->m_data, dataFrame->m_dataSize, dataFrame->m_timestamp, dataFrame->m_frameIndex, &option) &&
+							m_webpDecoder->DecodeMemoryStream(dataFrame->m_imageData, dataFrame->m_imageDataSize, dataFrame->m_timestamp, dataFrame->m_frameIndex, &option))
+						{
+							unifiedResult->meshResult = std::static_pointer_cast<CortoDecodeResult>(m_cortoDecoder->TakeResult());
+							unifiedResult->imgResult = std::static_pointer_cast<WebpDecodeResult>(m_webpDecoder->TakeResult());
+							unifiedResult->SyncWithMeshResult();
+
+							m_resultPresorter.Add(unifiedResult);
+						}
+						else
+						{
+							UE_LOG(EvercoastVoxelDecoderLog, Warning, TEXT("Decode mesh+image failed"));
+							m_cortoDecoder->UnsetReceivingResult();
+							if (m_webpDecoder)
+								m_webpDecoder->UnsetReceivingResult();
+
+						}
 					}
 					else
 					{
-						UE_LOG(EvercoastVoxelDecoderLog, Warning, TEXT("Decode mesh failed"));
+						if (m_cortoDecoder->DecodeMemoryStream(dataFrame->m_data, dataFrame->m_dataSize, dataFrame->m_timestamp, dataFrame->m_frameIndex, &option))
+						{
+							unifiedResult->meshResult = std::static_pointer_cast<CortoDecodeResult>(m_cortoDecoder->TakeResult());
+							unifiedResult->SyncWithMeshResult();
 
-						m_cortoDecoder->UnsetReceivingResult();
+							m_resultPresorter.Add(unifiedResult);
+						}
+						else
+						{
+							UE_LOG(EvercoastVoxelDecoderLog, Warning, TEXT("Decode mesh failed"));
+
+							m_cortoDecoder->UnsetReceivingResult();
+						}
 					}
+
+
+
+					dataFrame->Invalidate();
 				}
-
-				m_resultCache.Unlock();
-
-				dataFrame->Invalidate();
-				*/
 			}
 		}
 
@@ -958,7 +892,6 @@ public:
 		FTaskTagScope Scope(ETaskTag::EParallelRenderingThread);
 #endif
 		m_localDataFrameList.clear();
-		m_resultPresorter.Dispose();
 
 		m_cortoDecoder.reset();
 		m_webpDecoder.reset();
@@ -1046,8 +979,6 @@ public:
 		std::lock_guard<std::recursive_mutex> guardInput(m_inputMutex);
 
 		m_localDataFrameList.clear();
-
-		m_resultPresorter.DisposeAndReinit();
 	}
 
 private:
@@ -1069,7 +1000,7 @@ private:
 
 
 EvercoastAsyncStreamingDataDecoder::EvercoastAsyncStreamingDataDecoder(DecoderType decoderType) :
-	m_resultCache(DEFAULT_BUFFER_COUNT), m_decoderType(decoderType)
+	m_stickyDecodeWorker(nullptr), m_resultCache(DEFAULT_BUFFER_COUNT), m_resultPresorter(nullptr), m_decoderType(decoderType), m_auxDecoderType(DT_Invalid)
 {
 	// Init has been delayed to when we can know frame interval
 }
@@ -1077,6 +1008,9 @@ EvercoastAsyncStreamingDataDecoder::EvercoastAsyncStreamingDataDecoder(DecoderTy
 EvercoastAsyncStreamingDataDecoder::~EvercoastAsyncStreamingDataDecoder()
 {
 	Deinit();
+
+	m_decoderType = DT_Invalid;
+	m_auxDecoderType = DT_Invalid;
 }
 
 
@@ -1096,20 +1030,24 @@ void EvercoastAsyncStreamingDataDecoder::Init(double frameInterval, int maxThrea
 			m_decodeWorkerControllers.push_back(FRunnableThread::Create(decodeWorker, *name));
 		}
 	}
-	else if (m_decoderType == DT_EvercoastSpz)
+	else if (m_decoderType == DT_EvercoastSpz || m_decoderType == DT_GaussianSplatsPLY)
 	{
+		static int s_threadNameCounter = 0;
 		for (int i = 0; i < maxThreadCount; ++i)
 		{
 			auto gaussianDecoder = EvercoastGaussianSplatDecoder::Create();
-			auto decodeWorker = new EvercoastSpzDecodeThread(gaussianDecoder, *m_resultPresorter);
+
+			auto decodeWorker = new EvercoastSpzDecodeThread(gaussianDecoder, *m_resultPresorter, m_decoderType == DT_GaussianSplatsPLY);
 			m_decodeWorkers.push_back(decodeWorker);
 
-			FString name = FString::Format(TEXT("Gaussian Splat Decode Thread {0}"), { i + 1 });
+			FString name = FString::Format(TEXT("Gaussian Splat Decode Thread {0}"), { ++s_threadNameCounter });
 			m_decodeWorkerControllers.push_back(FRunnableThread::Create(decodeWorker, *name));
 		}
 	}
 	else if (m_decoderType == DT_CortoMesh)
 	{
+		m_stickyDecodeWorker = nullptr;
+
 		for (int i = 0; i < maxThreadCount; ++i)
 		{
 			auto cortoDecoder = CortoDecoder::Create();
@@ -1146,12 +1084,20 @@ void EvercoastAsyncStreamingDataDecoder::Deinit()
 	}
 
 
+	m_stickyDecodeWorker = nullptr;
 
 	m_decodeWorkers.clear();
 	m_decodeWorkerControllers.clear();
 
-	delete m_resultPresorter;
+	// Dispose common cache and presorter
+	if (m_resultPresorter)
+	{
+		m_resultPresorter->Dispose();
+		delete m_resultPresorter;
+	}
 	m_resultPresorter = nullptr;
+
+	
 }
 
 FEvercoastGenericDecodeThread* EvercoastAsyncStreamingDataDecoder::FindLeastJobWorker()
@@ -1179,8 +1125,33 @@ void EvercoastAsyncStreamingDataDecoder::Receive(double timestamp, int64_t frame
 {
 	UE_LOG(EvercoastVoxelDecoderLog, Verbose, TEXT("AsyncStreamingDataDecoder::Receive %.2f"), timestamp);
 
-	FEvercoastGenericDecodeThread* decodeWorker = FindLeastJobWorker();
-	decodeWorker->AddEntry(timestamp, frameIndex, data, data_size, metadata);
+
+	if (m_auxDecoderType != DT_Invalid)
+	{
+		// Always look for sticky decode worker first
+		FEvercoastGenericDecodeThread* decodeWorker = m_stickyDecodeWorker;
+		if (!decodeWorker)
+		{
+			decodeWorker = FindLeastJobWorker();
+		}
+
+		decodeWorker->AddEntry(timestamp, frameIndex, data, data_size, metadata);
+
+		if (metadata == UGhostTreeFormatReader::DECODE_META_NONE)
+		{
+			// After mesh data, the decode thread needs to be stick around to receive the next image data
+			m_stickyDecodeWorker = decodeWorker;
+		}
+		else
+		{
+			m_stickyDecodeWorker = nullptr;
+		}
+	}
+	else
+	{
+		FEvercoastGenericDecodeThread* decodeWorker = FindLeastJobWorker();
+		decodeWorker->AddEntry(timestamp, frameIndex, data, data_size, metadata);
+	}
 }
 
 std::shared_ptr<GenericDecodeResult> EvercoastAsyncStreamingDataDecoder::QueryResult(double timestamp)
@@ -1214,6 +1185,9 @@ void EvercoastAsyncStreamingDataDecoder::FlushAndDisposeResults()
 	{
 		(*it)->FlushAndDisposeResults();
 	}
+
+	// drain out common cache and reinit
+	m_resultPresorter->DisposeAndReinit();
 }
 
 void EvercoastAsyncStreamingDataDecoder::SetRequiresExternalData(bool required)
@@ -1225,19 +1199,23 @@ void EvercoastAsyncStreamingDataDecoder::SetRequiresExternalData(bool required)
 			CortoDecodeThread* decodeWorker = static_cast<CortoDecodeThread*>(*it);
 			decodeWorker->SetRequiresExternalData(required);
 		}
+
+		m_auxDecoderType = DT_WebpImage;
 	}
 }
 
 
 void EvercoastAsyncStreamingDataDecoder::ResizeBuffer(uint32_t bufferCount, double halfFrameInterval)
 {
+	Deinit();
+
 	m_resultCache.Resize(bufferCount);
 
 	m_halfCacheWidth = bufferCount / 2;
 	m_halfFrameInterval = halfFrameInterval;
 
-	// FIXME: supply maximum threads but Presorter seems to have problem when sending first a few frames when loops back to the beginning
-	Init(halfFrameInterval * 2.0, 1);// FGenericPlatformMisc::NumberOfCoresIncludingHyperthreads());
+	
+	Init(halfFrameInterval * 2.0, std::max(FGenericPlatformMisc::NumberOfCoresIncludingHyperthreads(), 2));
 }
 
 

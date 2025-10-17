@@ -1,11 +1,14 @@
 #include "Gaussian/EvercoastGaussianSplatShadowingSceneProxy.h"
-#include "Gaussian/EvercoastGaussianSplatPassthroughResult.h"
 #include "Gaussian/EvercoastGaussianSplatShadowCasterComp.h"
 
-FEvercoastGaussianSplatShadowingSceneProxy::FEvercoastGaussianSplatShadowingSceneProxy(const UEvercoastGaussianSplatShadowCasterComp* component, UMaterialInterface* material) :
-	FEvercoastGaussianSplatSceneProxy(component, material),
+FEvercoastGaussianSplatShadowingSceneProxy::FEvercoastGaussianSplatShadowingSceneProxy(const UEvercoastGaussianSplatShadowCasterComp* component, UMaterialInterface* material,
+	bool onlyReconOnTick, float shadowDecimate, float shadowBlobScale) :
+	FEvercoastGaussianSplatSceneProxy(component, material, EGaussianSplatRendererType::QUAD_RENDERER, shadowDecimate, 1.0f, 0.0f, false, false, false, false, false),
 	MaterialRelevance(component->GetMaterialRelevance(GetScene().GetFeatureLevel()))
 {
+	bPerformLateComputeShaderSplatRecon = onlyReconOnTick;
+	SetSplatDecimation(shadowDecimate);
+	SetShadowBlobScale(shadowBlobScale);
 }
 
 FEvercoastGaussianSplatShadowingSceneProxy::~FEvercoastGaussianSplatShadowingSceneProxy()
@@ -43,4 +46,10 @@ FPrimitiveViewRelevance FEvercoastGaussianSplatShadowingSceneProxy::GetViewRelev
 const FViewMatrices& FEvercoastGaussianSplatShadowingSceneProxy::ExtractRelevantViewMatrices(const FSceneView* pView) const
 {
 	return pView->ShadowViewMatrices;
+}
+
+bool FEvercoastGaussianSplatShadowingSceneProxy::ShouldSubmitDynamicMesh(const FSceneView* pView) const
+{
+	const bool bIsRenderingShadow = pView->ShadowViewMatrices.GetViewMatrix() != pView->ViewMatrices.GetViewMatrix();
+	return bIsRenderingShadow;
 }

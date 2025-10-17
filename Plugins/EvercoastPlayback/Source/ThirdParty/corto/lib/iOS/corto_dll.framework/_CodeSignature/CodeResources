@@ -4,6 +4,10 @@
 <dict>
 	<key>files</key>
 	<dict>
+		<key>Headers/SimpleString.h</key>
+		<data>
+		uj2EE84Mh+phpvCpCok16rH2jRk=
+		</data>
 		<key>Headers/bitstream.h</key>
 		<data>
 		uJyIGSpDRa9e6B7tYpHhPDO7ask=
@@ -30,19 +34,19 @@
 		</data>
 		<key>Headers/decoder.h</key>
 		<data>
-		4fPo90IDJVdSyjdxh9ZD1b7hwJk=
+		AlP+pYvdQhhTN3bdAKTu3lRBsXA=
 		</data>
 		<key>Headers/encoder.h</key>
 		<data>
-		AetmnCgCanKh1GbW7dX9REW64XM=
+		HUerYrVDsl23GenrAWjkXR7cwbM=
 		</data>
 		<key>Headers/index_attribute.h</key>
 		<data>
-		HO9sk4MAStl2PxJvVVK11WWvU0c=
+		1qe2hJJERxrkZoy9j9mqVbXZtZM=
 		</data>
 		<key>Headers/normal_attribute.h</key>
 		<data>
-		bpSt5aDd7AaZkyHT21jJsjx1jhk=
+		BOt9bgzo1bWTrJBoe1wnLgUMrPw=
 		</data>
 		<key>Headers/point.h</key>
 		<data>
@@ -54,7 +58,7 @@
 		</data>
 		<key>Headers/vertex_attribute.h</key>
 		<data>
-		FVfl1rzejJQ12m4K/2FHScxAl+k=
+		9/o8UrDfofQyYszL5J37va+ugtg=
 		</data>
 		<key>Headers/zpoint.h</key>
 		<data>
@@ -71,6 +75,17 @@
 	</dict>
 	<key>files2</key>
 	<dict>
+		<key>Headers/SimpleString.h</key>
+		<dict>
+			<key>hash</key>
+			<data>
+			uj2EE84Mh+phpvCpCok16rH2jRk=
+			</data>
+			<key>hash2</key>
+			<data>
+			2onJBeK035F48u7Kk2eMdbAKs+QJNEPpr6D+eg0V+L4=
+			</data>
+		</dict>
 		<key>Headers/bitstream.h</key>
 		<dict>
 			<key>hash</key>
@@ -141,44 +156,44 @@
 		<dict>
 			<key>hash</key>
 			<data>
-			4fPo90IDJVdSyjdxh9ZD1b7hwJk=
+			AlP+pYvdQhhTN3bdAKTu3lRBsXA=
 			</data>
 			<key>hash2</key>
 			<data>
-			l0fROJh2WuCG+DZ8IEIufktGOspEuKm/jeeWtg1sZpg=
+			DIk0qJz+7C4GI6gh/1SVgE1dAiqmxxl8+ccug0XcjLw=
 			</data>
 		</dict>
 		<key>Headers/encoder.h</key>
 		<dict>
 			<key>hash</key>
 			<data>
-			AetmnCgCanKh1GbW7dX9REW64XM=
+			HUerYrVDsl23GenrAWjkXR7cwbM=
 			</data>
 			<key>hash2</key>
 			<data>
-			ALtgA52dRm41/AYep0Y0EgjYwgSVp72ePtRQhW3fZYU=
+			11NTRIO936hdYduKKMlE0lBD0RVtT+tJ4+cMDHawVlQ=
 			</data>
 		</dict>
 		<key>Headers/index_attribute.h</key>
 		<dict>
 			<key>hash</key>
 			<data>
-			HO9sk4MAStl2PxJvVVK11WWvU0c=
+			1qe2hJJERxrkZoy9j9mqVbXZtZM=
 			</data>
 			<key>hash2</key>
 			<data>
-			kcQ4CCAchvdo0CmY4rkEkJEfqH85vDuMzma2138IytE=
+			RMC350oHJCAxYrMm9bGmtCVRuYep+rmUrBWz0kz60Cc=
 			</data>
 		</dict>
 		<key>Headers/normal_attribute.h</key>
 		<dict>
 			<key>hash</key>
 			<data>
-			bpSt5aDd7AaZkyHT21jJsjx1jhk=
+			BOt9bgzo1bWTrJBoe1wnLgUMrPw=
 			</data>
 			<key>hash2</key>
 			<data>
-			Mp01P/+fPVRPnRuuOi50Dtt0f0zuuyZGMOuzBdYscxU=
+			QwZSK5Av7Y440QGa114kqqDi7k9e0aviIgGRqsztXUQ=
 			</data>
 		</dict>
 		<key>Headers/point.h</key>
@@ -207,11 +222,11 @@
 		<dict>
 			<key>hash</key>
 			<data>
-			FVfl1rzejJQ12m4K/2FHScxAl+k=
+			9/o8UrDfofQyYszL5J37va+ugtg=
 			</data>
 			<key>hash2</key>
 			<data>
-			49uAOGOpuRERQwLPjtVv6zWMCQIIy1SimuDlVhrvcHw=
+			Xvrc2Vh279BOmUQ5QZaHfgokxNDEs6FZoo2YS5TI+1g=
 			</data>
 		</dict>
 		<key>Headers/zpoint.h</key>

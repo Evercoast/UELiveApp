@@ -814,8 +814,10 @@ UFFmpegVideoTextureHog::UFFmpegVideoTextureHog(const FObjectInitializer& ObjectI
 	m_lastQueriedTextureIndex(-1),
 	m_videoDuration(0),
 
+#ifdef REQUIRES_NV12_CONVERSION
 #if FORCE_NV12_CPU_CONVERSION
 	m_scratchPadRGBA(nullptr),
+#endif
 #endif
 	m_scratchPadY(nullptr),
 	m_scratchPadU(nullptr),
@@ -857,9 +859,11 @@ void UFFmpegVideoTextureHog::Destroy()
 	}
 
 	m_textureBuffer.Empty();
+#ifdef REQUIRES_NV12_CONVERSION
 #if FORCE_NV12_CPU_CONVERSION
 	delete[] m_scratchPadRGBA;
 	m_scratchPadRGBA = nullptr;
+#endif
 #endif
 	delete[] m_scratchPadY;
 	m_scratchPadY = nullptr;
@@ -921,17 +925,19 @@ void UFFmpegVideoTextureHog::OnVideoOpened(int64_t avformat_duration, int32_t fr
 {
 	std::lock_guard<std::recursive_mutex> guard(m_controlBitMutex);
 	// save the params and leave to main thread to work on it.
-	m_videoOpenParams = {
+	m_videoOpenParams = VideoOpenParams(
 		true,
 		avformat_duration,
 		frame_rate,
 		frame_width,
 		frame_height
-	};
+	);
 
 	m_currSeekingTarget = 0;
 	m_currSeekingTargetPrecache = 0;
 	m_currSeekingTargetPostcache = 2.0;
+
+	UE_LOG(EvercoastReaderLog, Log, TEXT("OnVideoOpened %d x %d frame_rate: %d"), m_videoOpenParams.frameWidth, m_videoOpenParams.frameHeight, m_videoOpenParams.frameRate);
 }
 
 bool UFFmpegVideoTextureHog::IsVideoOpened()
@@ -1070,7 +1076,70 @@ void UFFmpegVideoTextureHog::RestartHoggingIfPausedDueToFull()
 
 void UFFmpegVideoTextureHog::OnConvertNV12Texture(double timestamp, int64_t frame_index, int64_t frame_pts, int width, int height, uint32_t y_pitch, uint32_t u_pitch, uint32_t v_pitch, uint8_t* y_data, uint8_t* u_data, uint8_t* v_data)
 {
+#if SINGLE_YUVTEX_DECODE_OTA
+	if (!m_scratchPadY)
+		m_scratchPadY = new uint8_t[y_pitch * height];
 
+	if (!m_scratchPadU)
+		m_scratchPadU = new uint8_t[u_pitch * height / 2];
+
+	if (!m_scratchPadV)
+		m_scratchPadV = new uint8_t[v_pitch * height / 2];
+
+	memcpy(m_scratchPadY, y_data, y_pitch * height);
+	memcpy(m_scratchPadU, u_data, u_pitch * height / 2);
+	memcpy(m_scratchPadV, v_data, v_pitch * height / 2);
+
+
+
+	{
+
+		std::lock_guard<std::recursive_mutex> guard(m_textureRecordMutex);
+
+		UTextureRecord* pOutput = m_textureBuffer[m_textureBufferEnd];
+		UTexture* pTexture = pOutput->texture;
+
+		// Sync this call
+		m_renderThreadPromise = std::promise<void>();
+		m_renderThreadFuture = m_renderThreadPromise.get_future();
+
+		ENQUEUE_RENDER_COMMAND(CombineNV12Texture)(
+			[pTexture, y_pitch, u_pitch, v_pitch, y_data = m_scratchPadY, u_data = m_scratchPadU, v_data = m_scratchPadV, width, height, &promise = m_renderThreadPromise]
+		(FRHICommandListImmediate& RHICmdList)
+			{
+				FTextureResource* pRes = pTexture->GetResource();
+				check(pRes);
+				FRHITexture* pRHITex = pRes->GetTexture2DRHI();
+				check(pRHITex);
+
+				uint32_t YDataPitch = sizeof(uint8_t) * width; // way to get the proper pitch of RHITexture2D?
+				uint32_t UVDataPitch = sizeof(uint8_t) * (width / 2);
+
+				// first copy Y plane as-is
+				RHIUpdateTexture2D(pRHITex, 0, FUpdateTextureRegion2D(0, 0, 0, 0, width, height), YDataPitch, y_data);
+				// U plane to (0, H), (W/2, H/2)
+				RHIUpdateTexture2D(pRHITex, 0, FUpdateTextureRegion2D(0, height, 0, 0, width/2, height/2), UVDataPitch, u_data);
+				// V plane to (W/2, H) (W/2, H/2)
+				RHIUpdateTexture2D(pRHITex, 0, FUpdateTextureRegion2D(width/2, height, 0, 0, width/2, height/2), UVDataPitch, v_data);
+
+				promise.set_value();
+			}
+		);
+
+		m_renderThreadFuture.get();
+
+		pOutput->SetFrameTimestamp(frame_index, timestamp);
+		pOutput->MarkAsUsed(false);
+
+		UE_LOG(EvercoastReaderLog, Verbose, TEXT("Combined YUV frame=%" PRId64 ", time=%.2f, slot=%d"), frame_index, timestamp, m_textureBufferEnd);
+
+		m_textureBufferEnd = (m_textureBufferEnd + 1) % RING_QUEUE_SIZE;
+
+	}
+
+#else
+
+#if FORCE_NV12_CPU_CONVERSION
 	if (!m_scratchPadY)
 		m_scratchPadY = new uint8_t[y_pitch * height];
 
@@ -1084,11 +1153,19 @@ void UFFmpegVideoTextureHog::OnConvertNV12Texture(double timestamp, int64_t fram
 	memcpy(m_scratchPadY, y_data, y_pitch * height);
 	memcpy(m_scratchPadU, u_data, u_pitch * height / 2);
 	memcpy(m_scratchPadV, v_data, v_pitch * height / 2);
-
+#endif
 
 	// Scope here to avoid later call to IsFull() being mutex out 
 	{
 		std::lock_guard<std::recursive_mutex> guard(m_textureRecordMutex);
+
+		if (!m_videoOpened || m_textureBuffer.Num() < m_textureBufferEnd + 1)
+		{
+			// This shouldn't happen. m_textureBuffer should be already initialized in main thread before decoding actually begins
+			// But since someone getting a crash accessing m_textureBuffer in iOS, let's try doing nothing when the container isn't properly initialized
+			UE_LOG(EvercoastReaderLog, Error, TEXT("Texture cache has not been initialized before actual decoding finished. RING_QUEUE_SIZE configured: %d"), RING_QUEUE_SIZE);
+			return;
+		}
 
 		UTextureRecord* pOutput = m_textureBuffer[m_textureBufferEnd];
 
@@ -1151,6 +1228,7 @@ void UFFmpegVideoTextureHog::OnConvertNV12Texture(double timestamp, int64_t fram
 			[YPitch = y_pitch, UPitch = u_pitch, VPitch = v_pitch,
 			pYData = y_data, pUData = u_data, pVData = v_data,
 			nv12YPlaneRHI = m_nv12YPlaneRHI, nv12UPlaneRHI = m_nv12UPlaneRHI, nv12VPlaneRHI = m_nv12VPlaneRHI,
+            Y_SRV = m_nv12YPlaneSRV, U_SRV = m_nv12UPlaneSRV, V_SRV = m_nv12VPlaneSRV,
 			width = width, height = height, pTexture = pOutput->texture, &promise = m_renderThreadPromise](FRHICommandListImmediate& RHICmdList)
 		{
 			RHIUpdateTexture2D(nv12YPlaneRHI, 0, FUpdateTextureRegion2D(0, 0, 0, 0, width, height), YPitch, pYData);
@@ -1195,27 +1273,6 @@ void UFFmpegVideoTextureHog::OnConvertNV12Texture(double timestamp, int64_t fram
 				SetGraphicsPipelineState(RHICmdList, GraphicsPSOInit);
 #endif
 
-#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 3
-				FShaderResourceViewRHIRef Y_SRV = RHICmdList.CreateShaderResourceView(nv12YPlaneRHI, 
-					FRHIViewDesc::CreateTextureSRV()
-					.SetDimensionFromTexture(nv12YPlaneRHI)
-					.SetMipRange(0, 1)
-					.SetFormat(PF_R8));
-				FShaderResourceViewRHIRef U_SRV = RHICmdList.CreateShaderResourceView(nv12UPlaneRHI, 
-					FRHIViewDesc::CreateTextureSRV()
-					.SetDimensionFromTexture(nv12UPlaneRHI)
-					.SetMipRange(0, 1)
-					.SetFormat(PF_R8));
-				FShaderResourceViewRHIRef V_SRV = RHICmdList.CreateShaderResourceView(nv12VPlaneRHI, 
-					FRHIViewDesc::CreateTextureSRV()
-					.SetDimensionFromTexture(nv12VPlaneRHI)
-					.SetMipRange(0, 1)
-					.SetFormat(PF_R8));
-#else
-				FShaderResourceViewRHIRef Y_SRV = RHICreateShaderResourceView(nv12YPlaneRHI, 0, 1, PF_R8);
-				FShaderResourceViewRHIRef U_SRV = RHICreateShaderResourceView(nv12UPlaneRHI, 0, 1, PF_R8);
-				FShaderResourceViewRHIRef V_SRV = RHICreateShaderResourceView(nv12VPlaneRHI, 0, 1, PF_R8);
-#endif
 
 				PixelShader->SetParameters(RHICmdList, Y_SRV, U_SRV, V_SRV);
 
@@ -1244,6 +1301,7 @@ void UFFmpegVideoTextureHog::OnConvertNV12Texture(double timestamp, int64_t fram
 
 		m_textureBufferEnd = (m_textureBufferEnd + 1) % RING_QUEUE_SIZE;
 	}
+#endif
 
 }
 
@@ -1276,7 +1334,11 @@ void UFFmpegVideoTextureHog::Tick(UWorld* world)
 		{
 			RING_QUEUE_SIZE = (int)(m_videoFrameRate * SIZE_MULTIPLIER + 0.5f);
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 5
+			m_textureBuffer.SetNumZeroed(RING_QUEUE_SIZE, EAllowShrinking::Yes);
+#else
 			m_textureBuffer.SetNumZeroed(RING_QUEUE_SIZE, true);
+#endif
 			for (int i = 0; i < m_textureBuffer.Num(); ++i)
 			{
 				m_textureBuffer[i] = NewObject<UTextureRecord>(GetTransientPackage());
@@ -1287,13 +1349,20 @@ void UFFmpegVideoTextureHog::Tick(UWorld* world)
 		for (int i = 0; i < m_textureBuffer.Num(); ++i)
 		{
 			m_textureBuffer[i]->FreeTexture();
+#if SINGLE_YUVTEX_DECODE_OTA
+			// Single YUV dimension = [width, roundup(height * 1.5)]
+			m_textureBuffer[i]->InitTexture(m_videoOpenParams.frameWidth, m_videoOpenParams.frameHeight + (m_videoOpenParams.frameHeight + 1) / 2, i, EPixelFormat::PF_R8);
+#else
+
 #if FORCE_NV12_CPU_CONVERSION
 			m_textureBuffer[i]->InitTexture(m_videoOpenParams.frameWidth, m_videoOpenParams.frameHeight, i);
 #else
 			m_textureBuffer[i]->InitRenderTargetableTexture(m_videoOpenParams.frameWidth, m_videoOpenParams.frameHeight, i);
 #endif
+#endif
 		}
 
+#ifdef REQUIRES_NV12_CONVERSION
 #if !FORCE_NV12_CPU_CONVERSION
 		m_renderThreadPromise = std::promise<void>();
 		m_renderThreadFuture = m_renderThreadPromise.get_future();
@@ -1331,6 +1400,27 @@ void UFFmpegVideoTextureHog::Tick(UWorld* world)
 				m_nv12VPlaneRHI = RHICreateTexture2D(frame_width / 2, frame_height / 2, PF_R8, 1, 1, TexCreate_Dynamic | TexCreate_ShaderResource, CreateInfo);
 #endif
 				
+#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 3
+                m_nv12YPlaneSRV = RHICmdList.CreateShaderResourceView(m_nv12YPlaneRHI,
+                    FRHIViewDesc::CreateTextureSRV()
+                    .SetDimensionFromTexture(m_nv12YPlaneRHI)
+                    .SetMipRange(0, 1)
+                    .SetFormat(PF_R8));
+                m_nv12UPlaneSRV = RHICmdList.CreateShaderResourceView(m_nv12UPlaneRHI,
+                    FRHIViewDesc::CreateTextureSRV()
+                    .SetDimensionFromTexture(m_nv12UPlaneRHI)
+                    .SetMipRange(0, 1)
+                    .SetFormat(PF_R8));
+                m_nv12VPlaneSRV = RHICmdList.CreateShaderResourceView(m_nv12VPlaneRHI,
+                    FRHIViewDesc::CreateTextureSRV()
+                    .SetDimensionFromTexture(m_nv12VPlaneRHI)
+                    .SetMipRange(0, 1)
+                    .SetFormat(PF_R8));
+#else
+                m_nv12YPlaneSRV = RHICreateShaderResourceView(m_nv12YPlaneRHI, 0, 1, PF_R8);
+                m_nv12UPlaneSRV = RHICreateShaderResourceView(m_nv12UPlaneRHI, 0, 1, PF_R8);
+                m_nv12VPlaneSRV = RHICreateShaderResourceView(m_nv12VPlaneRHI, 0, 1, PF_R8);
+#endif
 
 				RHICmdList.ImmediateFlush(EImmediateFlushType::DispatchToRHIThread);
 				promise.set_value();
@@ -1338,14 +1428,17 @@ void UFFmpegVideoTextureHog::Tick(UWorld* world)
 
 		m_renderThreadFuture.get();
 #endif
+#endif
 
 		m_textureBufferStart = 0;
 		m_textureBufferEnd = 0;
 		m_videoDuration = m_videoOpenParams.avformatDuration * (1.0 / AV_TIME_BASE);
 
+#ifdef REQUIRES_NV12_CONVERSION
 #if FORCE_NV12_CPU_CONVERSION
 		delete[] m_scratchPadRGBA;
 		m_scratchPadRGBA = nullptr;
+#endif
 #endif
 		delete[] m_scratchPadY;
 		m_scratchPadY = nullptr;

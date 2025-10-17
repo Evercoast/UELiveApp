@@ -1,0 +1,138 @@
+#include "/Engine/Public/Platform.ush"
+#if SM6_PROFILE
+#include "/Engine/Private/Common.ush"
+#include "GaussianSplatConstants.ush"
+
+
+// Buffers
+StructuredBuffer<uint> input;
+RWStructuredBuffer<uint> output;
+RWStructuredBuffer<uint> groupSumsOutput;
+uint io_size;
+
+// Group-buffers. This is needed if io_size > INCLUSIVE_SUM_BLOCK_SIZE. Multiple groups has to accumulate a "group sum", and the "group sum" will be inclusive summed into "group sum sum" aka groupSumsScan
+StructuredBuffer<uint> groupSumsInput; // size = numGroups = ceil(totalElementCount / INCLUSIVE_SUM_BLOCK_SIZE) && size <= INCLUSIVE_SUM_GROUP_SIZE
+RWStructuredBuffer<uint> groupSumsScanOutput; // same size as groupSums
+uint numGroups;
+
+StructuredBuffer<uint> groupSumsScanInput;
+RWStructuredBuffer<uint> finalOutput;
+
+// Shared memory for block, 4096*4=16K, limit of groupshared memory
+groupshared uint temp[INCLUSIVE_SUM_BLOCK_SIZE];
+
+// Dispatch 1: First scan, get every INCLUSIVE_SUM_BLOCK_SIZE elements inclusive sum done
+[numthreads(INCLUSIVE_SUM_BLOCK_SIZE, 1, 1)]
+void CSInclusiveSum(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 Gid : SV_GroupID)
+{
+    uint globalId = DTid.x;
+    uint threadId = GTid.x;
+    uint groupId = Gid.x;
+    
+    //uint groupStart = Gid.x * INCLUSIVE_SUM_BLOCK_SIZE;
+
+    // Guard shared memory access
+    if (globalId < io_size)
+        temp[threadId] = input[globalId];
+    else
+        temp[threadId] = 0;
+
+    GroupMemoryBarrierWithGroupSync();
+
+    for (uint offset = 1; offset < INCLUSIVE_SUM_BLOCK_SIZE; offset *= 2)
+    {
+        uint val = 0;
+        if (threadId >= offset)
+            val = temp[threadId - offset];
+
+        GroupMemoryBarrierWithGroupSync();
+        temp[threadId] += val;
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    if (globalId < io_size)
+    {
+        output[globalId] = temp[threadId];
+    }
+    
+    // Last thread of the group stores the final sum
+    if (threadId == INCLUSIVE_SUM_BLOCK_SIZE - 1 || globalId == io_size - 1)
+        groupSumsOutput[groupId] = temp[threadId];
+
+}
+
+// Shared memory for groups, 4096*4=16K, limit of groupshared memory
+groupshared uint temp_for_groupsums[INCLUSIVE_SUM_BLOCK_SIZE];
+
+
+// Dispatch 2: Basically same as CSInclusiveSum() but operate on groupSums->groupSumsScan, and the element count is numGroups
+[numthreads(INCLUSIVE_SUM_GROUP_SIZE, 1, 1)]
+void CSInclusiveGroupSum(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 Gid : SV_GroupID)
+{
+    uint globalId = DTid.x;
+    uint threadId = GTid.x;
+    
+    //uint groupStart = Gid.x * INCLUSIVE_SUM_GROUP_SIZE;
+
+    // Guard shared memory access
+    if (globalId < numGroups)
+        temp_for_groupsums[threadId] = groupSumsInput[globalId];
+    else
+        temp_for_groupsums[threadId] = 0;
+
+    GroupMemoryBarrierWithGroupSync();
+
+    for (uint offset = 1; offset < INCLUSIVE_SUM_GROUP_SIZE; offset *= 2)
+    {
+        uint val = 0;
+        if (threadId >= offset)
+            val = temp_for_groupsums[threadId - offset];
+
+        GroupMemoryBarrierWithGroupSync();
+        temp_for_groupsums[threadId] += val;
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    if (globalId < numGroups)
+    {
+        groupSumsScanOutput[globalId] = temp_for_groupsums[threadId];
+    }
+    
+}
+
+// Dispatch 3: add groupSumsScan to every according element back to output buffer
+[numthreads(INCLUSIVE_SUM_BLOCK_SIZE, 1, 1)]
+void CSAddGroupOffsets(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint GI : SV_GroupIndex, uint3 Gid : SV_GroupID)
+{
+    uint tid = GTid.x;
+    uint gid = DTid.x;
+
+    uint groupStart = Gid.x * INCLUSIVE_SUM_BLOCK_SIZE;
+    uint globalIndex = groupStart + tid;
+
+    if (Gid.x == 0 || globalIndex >= io_size)
+        return;
+
+    uint groupOffset = groupSumsScanInput[Gid.x - 1];
+    finalOutput[globalIndex] += groupOffset;
+}
+
+#else
+
+// All dummy
+[numthreads(1, 1, 1)]
+void CSInclusiveSum(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 Gid : SV_GroupID)
+{
+}
+
+[numthreads(1, 1, 1)]
+void CSInclusiveGroupSum(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 Gid : SV_GroupID)
+{
+}
+
+[numthreads(1, 1, 1)]
+void CSAddGroupOffsets(uint3 DTid : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint GI : SV_GroupIndex, uint3 Gid : SV_GroupID)
+{
+}
+
+#endif

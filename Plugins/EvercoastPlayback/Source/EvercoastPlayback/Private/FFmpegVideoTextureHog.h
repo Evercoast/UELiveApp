@@ -9,7 +9,24 @@
 #include "VideoTextureHog.h"
 #include "FFmpegVideoTextureHog.generated.h"
 
+#if PLATFORM_MAC || PLATFORM_IOS
+// The ChromaUV isn't quite right for some reason
+#define SINGLE_YUVTEX_DECODE_OTA (0)
+#else
+#define SINGLE_YUVTEX_DECODE_OTA (1)
+#endif
+
+#if !SINGLE_YUVTEX_DECODE_OTA
+
+#define REQUIRES_NV12_CONVERSION
+
+#if PLATFORM_IOS
+#define FORCE_NV12_CPU_CONVERSION (1)
+#else
 #define FORCE_NV12_CPU_CONVERSION (0)
+#endif
+
+#endif
 
 class UTextureRecord;
 class FFFmpegDecodingThread;
@@ -73,6 +90,27 @@ private:
 		int32_t			frameRate = 0;
 		int				frameWidth = 0;
 		int				frameHeight = 0;
+
+		VideoOpenParams() : 
+			isPending(false),
+			avformatDuration(0),
+			frameRate(0),
+			frameWidth(0),
+			frameHeight(0)
+		{
+
+		}
+
+		VideoOpenParams(bool inIsPending, int64_t inAVFormatDuration, int32_t inFrameRate, int inFrameWidth, int inFrameHeight) :
+			isPending(inIsPending),
+			avformatDuration(inAVFormatDuration),
+			frameRate(inFrameRate),
+			frameWidth(inFrameWidth),
+			frameHeight(inFrameHeight)
+		{
+
+		}
+
 	};
 	VideoOpenParams		m_videoOpenParams;
 	bool				m_videoOpened;
@@ -95,17 +133,23 @@ private:
 	
 	double				m_videoDuration = 0;
 
+#ifdef REQUIRES_NV12_CONVERSION
 #if FORCE_NV12_CPU_CONVERSION
 	uint8_t*			m_scratchPadRGBA;
 #else
-	FTexture2DRHIRef	m_nv12YPlaneRHI;
-	FTexture2DRHIRef	m_nv12UPlaneRHI;
-	FTexture2DRHIRef	m_nv12VPlaneRHI;
+	FTextureRHIRef	m_nv12YPlaneRHI;
+	FTextureRHIRef	m_nv12UPlaneRHI;
+	FTextureRHIRef	m_nv12VPlaneRHI;
+    FShaderResourceViewRHIRef m_nv12YPlaneSRV;
+    FShaderResourceViewRHIRef m_nv12UPlaneSRV;
+    FShaderResourceViewRHIRef m_nv12VPlaneSRV;
+#endif
 #endif
 	// conversion
 	uint8* m_scratchPadY;
 	uint8* m_scratchPadU;
 	uint8* m_scratchPadV;
+
 
 	// threading
 	FFFmpegDecodingThread*					m_runnable;

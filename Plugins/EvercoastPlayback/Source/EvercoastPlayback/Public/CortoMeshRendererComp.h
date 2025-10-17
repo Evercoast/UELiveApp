@@ -17,6 +17,8 @@ class IEvercoastStreamingDataUploader;
 class USceneCaptureComponent2D;
 class FCortoMeshSceneProxy;
 
+#define CORTO_RENDERER_MAKE_TEXTURE_COPY (0)
+
 
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class EVERCOASTPLAYBACK_API UCortoMeshRendererComp : public UMeshComponent
@@ -143,11 +145,17 @@ private:
 
 	mutable bool m_materialDirty;
 
+
 	UPROPERTY(Transient)
 	UTexture2D* m_mainTexture[2];			// this is a copy of texture set from SetTextureData()
 
 	UPROPERTY()
 	UTexture2D* m_mainTextureFirstFrame;	// copy of the copy of texture set from SetTextureData(), used for keeping the first frame when mesh hasn't started rendering, or in editor mode
+
+#if CORTO_RENDERER_MAKE_TEXTURE_COPY
+	int m_mainTexturePtr = 0;
+	TSharedPtr<TPromise<void>, ESPMode::ThreadSafe> m_copyPromise;
+#endif
 
 	UPROPERTY(EditDefaultsOnly, Category="Evercoast Playback")
 	bool bIsImageEnhancementMaterial = false;
@@ -155,9 +163,9 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Evercoast Playback")
 	bool bIsEyeAdaptationCorrectedMaterial = false;
 
-	int m_mainTexturePtr = 0;
+	
 
-	TSharedPtr<TPromise<void>, ESPMode::ThreadSafe> m_copyPromise;
+	
 
 	UPROPERTY(Transient)
 	UTextureRenderTarget2D* CaptureWorldNormalRenderTarget[2];

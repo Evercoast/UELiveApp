@@ -1,7 +1,7 @@
 #include "Gaussian/EvercoastGaussianSplatShadowCasterComp.h"
-#include "Gaussian/EvercoastGaussianSplatComputeUploader.h"
+#include "Gaussian/EvercoastGaussianSplatCSUploader.h"
 #include "Gaussian/EvercoastGaussianSplatDecoder.h"
-#include "Gaussian/GaussianSplatComputeShader.h"
+#include "Gaussian/GaussianSplatPreprocessComputeShader.h"
 #include "Gaussian/EvercoastGaussianSplatShadowingSceneProxy.h"
 #include "RHICommandList.h"
 #include "RHIUtilities.h"
@@ -18,9 +18,42 @@ UEvercoastGaussianSplatShadowCasterComp::UEvercoastGaussianSplatShadowCasterComp
     CastShadow = true;
     bRenderInMainPass = false;
     bRenderInDepthPass = false;
+    rendererType = EGaussianSplatRendererType::QUAD_RENDERER;
+    bEnableTileRendererDepthWrite = false;
 }
 
 
+void UEvercoastGaussianSplatShadowCasterComp::SetShadowDecimate(float InSplatDecimate)
+{
+    ShadowDecimate = InSplatDecimate;
+
+    if (SceneProxy)
+    {
+        ((FEvercoastGaussianSplatShadowingSceneProxy*)SceneProxy)->SetSplatDecimation(ShadowDecimate);
+    }
+}
+
+void UEvercoastGaussianSplatShadowCasterComp::SetShadowBlobScale(float InBlobScale)
+{
+    ShadowBlobScale = InBlobScale;
+
+    if (SceneProxy)
+    {
+        ((FEvercoastGaussianSplatShadowingSceneProxy*)SceneProxy)->SetShadowBlobScale(ShadowBlobScale);
+    }
+}
+
+void UEvercoastGaussianSplatShadowCasterComp::SetRendererType(EGaussianSplatRendererType newType)
+{
+    // always use quad renderer for shadow 
+    rendererType = EGaussianSplatRendererType::QUAD_RENDERER;
+}
+
+void UEvercoastGaussianSplatShadowCasterComp::SetEnableTileRendererDepthWrite(bool enableDepthWrite)
+{
+    // it shouldn't matter
+    bEnableTileRendererDepthWrite = false;
+}
 
 FPrimitiveSceneProxy* UEvercoastGaussianSplatShadowCasterComp::CreateSceneProxy()
 {
@@ -30,7 +63,10 @@ FPrimitiveSceneProxy* UEvercoastGaussianSplatShadowCasterComp::CreateSceneProxy(
 
         GetDataUploader()->MarkDataDirty();
 
-        FEvercoastGaussianSplatShadowingSceneProxy* newSceneProxy = new FEvercoastGaussianSplatShadowingSceneProxy(this, GaussianSplatMaterial);
+        m_materialInstance = GetNewMaterialInstanceDynamic();
+
+        FEvercoastGaussianSplatShadowingSceneProxy* newSceneProxy = new FEvercoastGaussianSplatShadowingSceneProxy(this, m_materialInstance,
+            bReconstructOnTickOnly, ShadowDecimate, ShadowBlobScale);
 
         ENQUEUE_RENDER_COMMAND(FEvercoastGaussianDataUpdate)(
             [sceneProxy = newSceneProxy, encodedSplatData = GetRetainedEncodedSplatData()](FRHICommandListImmediate& RHICmdList)
@@ -41,23 +77,4 @@ FPrimitiveSceneProxy* UEvercoastGaussianSplatShadowCasterComp::CreateSceneProxy(
     }
 
     return SceneProxy;
-}
-
-
-FBoxSphereBounds UEvercoastGaussianSplatShadowCasterComp::CalcBounds(const FTransform& LocalToWorld) const
-{
-    FBoxSphereBounds bounds = CalcLocalBounds();
-
-    return bounds.TransformBy(LocalToWorld);
-}
-
-FBoxSphereBounds UEvercoastGaussianSplatShadowCasterComp::CalcLocalBounds() const
-{
-    if (SceneProxy)
-    {
-        FEvercoastGaussianSplatShadowingSceneProxy* gaussianShadowingSceneProxy = static_cast<FEvercoastGaussianSplatShadowingSceneProxy*>(SceneProxy);
-        gaussianShadowingSceneProxy->GetLocalBounds();
-    }
-
-    return FEvercoastGaussianSplatShadowingSceneProxy::GetDefaultLocalBounds();
 }

@@ -45,9 +45,9 @@ private:
 	std::shared_ptr<EvercoastLocalVoxelFrame> m_voxelFrame;
 
 	TArray<uint64_t>				m_positions;
-	FTexture2DRHIRef				m_positionsTex;
+	FTextureRHIRef					m_positionsTex;
 	FShaderResourceViewRHIRef		m_positionsSRV;
 	TArray<uint32_t>				m_colours;
-	FTexture2DRHIRef				m_coloursTex;
+	FTextureRHIRef					m_coloursTex;
 	FShaderResourceViewRHIRef		m_coloursSRV;
 };

@@ -527,8 +527,8 @@ public:
         if (!NormalRender_PositionVertexBuffer->VertexBufferRHI)
             return;
         
-		const FTexture2DRHIRef& DestinationTextureRHI = DestTexture.TextureRHI->GetTexture2D();
-		const FTexture2DRHIRef& DestinationDepthTextureRHI = NormalRender_DepthTarget->DepthTextureRHI;
+		const FTextureRHIRef& DestinationTextureRHI = DestTexture.TextureRHI->GetTexture2D();
+		const FTextureRHIRef& DestinationDepthTextureRHI = NormalRender_DepthTarget->DepthTextureRHI;
 
 		// Need this for Vulkan
 		RHICmdList.Transition(FRHITransitionInfo(DestinationTextureRHI, ERHIAccess::SRVMask, ERHIAccess::RTV));
@@ -798,6 +798,56 @@ public:
 	virtual bool HasRayTracingRepresentation() const override { return true; }
 #endif
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 5
+	virtual void GetDynamicRayTracingInstances(class FRayTracingInstanceCollector& Collector) override final
+	{
+		if (!Material)
+			return;
+
+		if (RayTracingGeometry.GetRHI()->IsValid())
+		{
+			check(RayTracingGeometry.Initializer.IndexBuffer.IsValid());
+
+			FRayTracingInstance RayTracingInstance;
+			RayTracingInstance.Geometry = &RayTracingGeometry;
+			RayTracingInstance.InstanceTransforms.Add(GetLocalToWorld());
+
+			uint32 SectionIdx = 0;
+			FMeshBatch MeshBatch;
+
+			MeshBatch.VertexFactory = &VertexFactory;
+			MeshBatch.SegmentIndex = 0;
+			MeshBatch.MaterialRenderProxy = Material->GetRenderProxy();
+			MeshBatch.ReverseCulling = IsLocalToWorldDeterminantNegative();
+			MeshBatch.Type = PT_TriangleList;
+			MeshBatch.DepthPriorityGroup = SDPG_World;
+			MeshBatch.bCanApplyViewModeOverrides = false;
+			MeshBatch.CastRayTracedShadow = IsShadowCast(Collector.GetReferenceView());
+
+			FMeshBatchElement& BatchElement = MeshBatch.Elements[0];
+			BatchElement.IndexBuffer = &IndexBuffer;
+
+			bool bHasPrecomputedVolumetricLightmap;
+			FMatrix PreviousLocalToWorld;
+			int32 SingleCaptureIndex;
+			bool bOutputVelocity;
+			GetScene().GetPrimitiveUniformShaderParameters_RenderThread(GetPrimitiveSceneInfo(), bHasPrecomputedVolumetricLightmap, PreviousLocalToWorld, SingleCaptureIndex, bOutputVelocity);
+
+			FDynamicPrimitiveUniformBuffer& DynamicPrimitiveUniformBuffer = Collector.AllocateOneFrameResource<FDynamicPrimitiveUniformBuffer>();
+			DynamicPrimitiveUniformBuffer.Set(FRHICommandListImmediate::Get(), GetLocalToWorld(), PreviousLocalToWorld, GetBounds(), GetLocalBounds(), GetLocalBounds(), true, bHasPrecomputedVolumetricLightmap, bOutputVelocity, GetCustomPrimitiveData());
+			BatchElement.PrimitiveUniformBufferResource = &DynamicPrimitiveUniformBuffer.UniformBuffer;
+
+			BatchElement.FirstIndex = 0;
+			BatchElement.NumPrimitives = IndexBuffer.Indices.Num() / 3;
+			BatchElement.MinVertexIndex = 0;
+			BatchElement.MaxVertexIndex = VertexBuffers.PositionVertexBuffer.GetNumVertices() - 1;
+
+			RayTracingInstance.Materials.Add(MeshBatch);
+
+			Collector.AddRayTracingInstance(RayTracingInstance);
+		}
+	}
+#else
 	virtual void GetDynamicRayTracingInstances(FRayTracingMaterialGatheringContext& Context, TArray<FRayTracingInstance>& OutRayTracingInstances) override final
 	{
 		if (!Material)
@@ -869,6 +919,8 @@ public:
 	}
 #endif
 
+#endif
+
 private:
 	int32 NumVerts;
 	int32 NumIndices;
@@ -913,10 +965,12 @@ UCortoMeshRendererComp::UCortoMeshRendererComp(const FObjectInitializer& ObjectI
 	m_meshUploader = std::make_shared<CortoDataUploader>(this);
 	m_materialInstance = nullptr;
 
+#if CORTO_RENDERER_MAKE_TEXTURE_COPY
 	m_mainTexture[0] = nullptr;
 	m_mainTexture[1] = nullptr;
 	m_mainTextureFirstFrame = nullptr;
-
+	m_mainTexturePtr = 0;
+#endif
 	m_materialDirty = true;
 }
 
@@ -1132,17 +1186,20 @@ void UCortoMeshRendererComp::SetTextureData(std::shared_ptr<CortoLocalTextureFra
 
 	auto texture = localTexture->GetTexture();
 	check(texture && texture->GetResource());
-	m_copyPromise = MakeShared<TPromise<void>, ESPMode::ThreadSafe>();
-	auto future = m_copyPromise->GetFuture();
 
 	// getting ready to make a copy
 	int32 width = texture->GetSurfaceWidth();
 	int32 height = texture->GetSurfaceHeight();
-	EPixelFormat pixelFormat = PF_B8G8R8A8;
-	if (localTexture->NeedsSwizzle())
-	{
-		pixelFormat = PF_R8G8B8A8;
-	}
+
+	EPixelFormat pixelFormat = localTexture->GetPixelFormat();
+
+#if CORTO_RENDERER_MAKE_TEXTURE_COPY
+	m_copyPromise = MakeShared<TPromise<void>, ESPMode::ThreadSafe>();
+	auto future = m_copyPromise->GetFuture();
+
+	FTexturePlatformData** ppPlatformData = texture->GetRunningPlatformData();
+	check(ppPlatformData && *ppPlatformData);
+	EPixelFormat pixelFormat = (*ppPlatformData)->PixelFormat;
 
 	UTexture2D*& mainTexture = m_mainTexture[m_mainTexturePtr]; // ref to ptr, otherwise we have to remember to assign the ptr back to the array or massive memory leak!
 	if (!mainTexture || mainTexture->GetSurfaceWidth() != width || mainTexture->GetSurfaceHeight() != height || mainTexture->GetPixelFormat(0) != pixelFormat )
@@ -1198,6 +1255,7 @@ void UCortoMeshRendererComp::SetTextureData(std::shared_ptr<CortoLocalTextureFra
 		});
 
 	future.Get();
+#endif
 
 	TArray< FMaterialParameterInfo > paramInfos;
 	TArray< FGuid > paramIds;
@@ -1208,11 +1266,20 @@ void UCortoMeshRendererComp::SetTextureData(std::shared_ptr<CortoLocalTextureFra
 		UE_LOG(EvercoastRendererLog, Warning, TEXT("No texture parameter found in material. Cannot render."));
 		return;
 	}
+#if CORTO_RENDERER_MAKE_TEXTURE_COPY
 	m_materialInstance->SetTextureParameterValue(TEXT("MainTex"), needUpdateFirstFrame ? m_mainTextureFirstFrame : mainTexture);
+	m_mainTexturePtr = (m_mainTexturePtr + 1) % 2;
+#else
+	m_materialInstance->SetTextureParameterValue(TEXT("MainTex"), m_currLocalTextureFrame->GetTexture());
+#endif
+
 	m_materialInstance->SetScalarParameterValue(TEXT("WorldNormalFactor"), bGenerateNormal ? 1.0f : 0.0f);
 
+	// Decide which mapping function to use: YUV to RGB, or plain sampling RGB
+	m_materialInstance->SetScalarParameterValue(TEXT("InputYUVOrRGB"), (pixelFormat == PF_R8 || pixelFormat == PF_G8)  ? 0.0f : 1.0f);
 
-	m_mainTexturePtr = (m_mainTexturePtr + 1) % 2;
+
+	
 
 }
 

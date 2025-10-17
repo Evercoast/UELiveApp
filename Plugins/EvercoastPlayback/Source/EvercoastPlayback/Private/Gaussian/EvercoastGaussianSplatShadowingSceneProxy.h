@@ -13,13 +13,10 @@
 #endif
 
 class UEvercoastGaussianSplatShadowCasterComp;
-class EvercoastGaussianSplatPassthroughResult;
-class UMaterialInstanceDynamic;
-
 class FEvercoastGaussianSplatShadowingSceneProxy : public FEvercoastGaussianSplatSceneProxy
 {
 public:
-	FEvercoastGaussianSplatShadowingSceneProxy(const UEvercoastGaussianSplatShadowCasterComp* component, UMaterialInterface* material);
+	FEvercoastGaussianSplatShadowingSceneProxy(const UEvercoastGaussianSplatShadowCasterComp* component, UMaterialInterface* material, bool onlyReconOnTick, float shadowDecimate, float shadowBlobScale);
 	virtual ~FEvercoastGaussianSplatShadowingSceneProxy();
 
 	/** Return a type (or subtype) specific hash for sorting purposes */
@@ -27,7 +24,9 @@ public:
 	virtual FPrimitiveViewRelevance GetViewRelevance(const FSceneView* View) const override;
 
 protected:
-	const FViewMatrices& ExtractRelevantViewMatrices(const FSceneView* pView) const;
+	// Return shadow view matrix
+	virtual const FViewMatrices& ExtractRelevantViewMatrices(const FSceneView* pView) const override;
+	virtual bool ShouldSubmitDynamicMesh(const FSceneView* pView) const override;
 
 private:
 	/** The view relevance for the gaussian material. Critical for GetViewRelevance() */

@@ -248,14 +248,14 @@ private:
 	void _PrintDebugStatus() const; 
 	bool IsFrameCached(double testTimestamp) const;
 
-
+	void BypassGhostTreeIO();
 private:
 
 	enum PlaybackStatus
 	{
-		Stopped = 0,
-		Playing,
-		Paused,
+		PS_Stopped = 0,
+		PS_Playing,
+		PS_Paused,
 	};
 
 	enum SyncStatus

@@ -51,15 +51,22 @@ bool Mp3Decoder::Decode(const uint8_t* data, int32_t dataSize, RuntimeAudioMetad
 	outMetadata->SampleRate = dr_mp3.sampleRate;
 
 	// fill in the pcm data
+#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 5
+	outPCMData->SetNum(totalPCMFrameCount * dr_mp3.channels, EAllowShrinking::Yes);
+#else
 	outPCMData->SetNum(totalPCMFrameCount * dr_mp3.channels, true);
-
+#endif
 	uint64_t framesCount = drmp3_read_pcm_frames_f32(&dr_mp3, totalPCMFrameCount, outPCMData->GetData());
 	check(framesCount <= totalPCMFrameCount); // we don't want to overflow the TArray container
 
 	// This might happen if the actual read and transcoded samples are less than declared in the header?
 	if (framesCount < totalPCMFrameCount)
 	{
+#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 5
+		outPCMData->SetNum(framesCount * dr_mp3.channels, EAllowShrinking::Yes);
+#else
 		outPCMData->SetNum(framesCount * dr_mp3.channels, true);
+#endif
 	}
 
 	return true;

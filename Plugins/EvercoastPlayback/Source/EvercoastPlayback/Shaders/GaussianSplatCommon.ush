@@ -1,0 +1,27 @@
+#include "/Engine/Public/Platform.ush"
+#include "/Engine/Private/Common.ush"
+
+#include "GaussianSplatConstants.ush"
+#include "GaussianSplatTypes.ush"
+
+
+
+
+// These are NOT getting a regular pixel based rectangle
+// The rectangle.xy is based on horizontal and vertical tile index!
+
+// TileSize = The pixel size each tile has horizontally and vertically
+// TileCount = The total number of tiles horizontally and vertically
+// Output TileIndexRangeMax is exclusive indices
+void CalcTileIndexRange(const float2 p, int max_radius, out uint2 TileIndexRangeMin, out uint2 TileIndexRangeMax, uint2 TileSize, uint2 TileCount)
+{
+    TileIndexRangeMin = uint2(
+        min(TileCount.x, max((int) 0, (int) ((p.x - max_radius) / TileSize.x))),
+		min(TileCount.y, max((int) 0, (int) ((p.y - max_radius) / TileSize.y)))
+	);
+
+    TileIndexRangeMax = uint2(
+        min(TileCount.x, max((int) 0, (int) ((p.x + max_radius + TileSize.x - 1) / TileSize.x))),
+		min(TileCount.y, max((int) 0, (int) ((p.y + max_radius + TileSize.y - 1) / TileSize.y)))
+	);
+}

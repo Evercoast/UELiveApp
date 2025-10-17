@@ -3,8 +3,7 @@
 #include "EvercoastMVFVoxelRendererComp.h"
 #include "VoxelRendererComponent.h"
 #include "CortoMeshRendererComp.h"
-#include "Gaussian/EvercoastGaussianSplatRendererComp.h"
-#include "Gaussian/EvercoastGaussianSplatComputeComponent.h"
+#include "Gaussian/EvercoastGaussianSplatCSRendererComp.h"
 #include "Gaussian/EvercoastGaussianSplatShadowCasterComp.h"
 
 // Change this type to either UEvercoastVoxelRendererComp or UEvercoastMVFVoxelRendererComp, as well as in the header(UHT forbids me to do both in one place)
@@ -114,7 +113,11 @@ bool UEvercoastRendererSelectorComp::IsUsingGaussianSplatRenderer() const
 	if (!m_currRenderer)
 		return false;
 
-	return m_currRenderer->GetClass() == UEvercoastGaussianSplatComputeComponent::StaticClass();
+#if PLATFORM_WINDOWS
+	return m_currRenderer->GetClass() == UEvercoastGaussianSplatCSRendererComp::StaticClass();
+#else
+	return false;
+#endif
 }
 
 void UEvercoastRendererSelectorComp::ResetRendererSelection()
@@ -217,12 +220,13 @@ void UEvercoastRendererSelectorComp::ChooseCorrespondingSubRenderer(DecoderType 
 			m_gaussianRenderer->SetVisibility(false, true);
 		}
 	}
-	else if (decoderType == DT_EvercoastSpz)
+#if PLATFORM_WINDOWS	
+	else if (decoderType == DT_EvercoastSpz || decoderType == DT_GaussianSplatsPLY)
 	{
 		if(!m_gaussianRenderer)
 		{
 			// main renderer
-			auto existingGaussianComponent = Actor->FindComponentByClass<UEvercoastGaussianSplatComputeComponent>();
+			auto existingGaussianComponent = Actor->FindComponentByClass<UEvercoastGaussianSplatCSRendererComp>();
 			if (existingGaussianComponent)
 			{
 				m_gaussianRenderer = existingGaussianComponent;
@@ -231,7 +235,7 @@ void UEvercoastRendererSelectorComp::ChooseCorrespondingSubRenderer(DecoderType 
 			}
 			else
 			{
-				m_gaussianRenderer = NewObject<UEvercoastGaussianSplatComputeComponent>(Actor, UEvercoastGaussianSplatComputeComponent::StaticClass());
+				m_gaussianRenderer = NewObject<UEvercoastGaussianSplatCSRendererComp>(Actor, UEvercoastGaussianSplatCSRendererComp::StaticClass());
 				m_gaussianRenderer->RegisterComponent();
 				m_gaussianRenderer->AttachToComponent(this, FAttachmentTransformRules::KeepRelativeTransform);
 				Actor->AddInstanceComponent(m_gaussianRenderer);
@@ -269,6 +273,7 @@ void UEvercoastRendererSelectorComp::ChooseCorrespondingSubRenderer(DecoderType 
 		m_currRenderer = m_gaussianRenderer;
 		m_currRenderer->SetVisibility(true, true);
 	}
+#endif	
 	else
 	{
 		ensureMsgf(false, TEXT("Unexpected decoder type. Unable to choose renderer!"));
@@ -296,7 +301,7 @@ std::vector<std::shared_ptr<IEvercoastStreamingDataUploader>> UEvercoastRenderer
 	else if (IsUsingGaussianSplatRenderer())
 	{
 		// Gaussian has two render components thus data uploaders 
-		uploaders.push_back(Cast<UEvercoastGaussianSplatComputeComponent>(m_currRenderer)->GetDataUploader());
+		uploaders.push_back(Cast<UEvercoastGaussianSplatCSRendererComp>(m_currRenderer)->GetDataUploader());
 		if (m_gaussianShadowCaster)
 			uploaders.push_back(m_gaussianShadowCaster->GetDataUploader());
 	}

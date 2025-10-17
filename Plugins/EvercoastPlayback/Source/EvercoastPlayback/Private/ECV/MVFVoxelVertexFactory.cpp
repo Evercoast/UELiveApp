@@ -15,7 +15,7 @@
 #endif
 #endif
 
-IMPLEMENT_GLOBAL_SHADER_PARAMETER_STRUCT(FMVFVoxelVertexFactoryParameters, "VoxelVF");
+IMPLEMENT_GLOBAL_SHADER_PARAMETER_STRUCT(FMVFVoxelVertexFactoryParameters, "MVFVoxelVF");
 
 /**
  * Shader parameters for the vector field visualization vertex factory.
@@ -78,7 +78,7 @@ public:
 		VertexDeclarationRHI.SafeRelease();
 	}
 };
-TGlobalResource<FVoxelVertexDeclaration> GVoxelVertexDeclaration;
+static TGlobalResource<FVoxelVertexDeclaration> GVoxelVertexDeclaration;
 
 /**
  * A dummy vertex buffer to bind when rendering point clouds. This prevents
@@ -126,7 +126,7 @@ public:
 #endif
 	}
 };
-TGlobalResource<FDummyVertexBuffer> GVoxelCloudVertexBuffer;
+static TGlobalResource<FDummyVertexBuffer> GVoxelCloudVertexBuffer;
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 3
 void FMVFVoxelVertexFactory::InitRHI(FRHICommandListBase& RHICmdList)
@@ -185,11 +185,21 @@ IMPLEMENT_TYPE_LAYOUT(FMVFVoxelVertexFactoryShaderParameters);
 
 #if ENGINE_MAJOR_VERSION == 5
 IMPLEMENT_VERTEX_FACTORY_PARAMETER_TYPE(FMVFVoxelVertexFactory, SF_Vertex, FMVFVoxelVertexFactoryShaderParameters);
+
+#if ENGINE_MINOR_VERSION >= 5
+IMPLEMENT_VERTEX_FACTORY_TYPE(FMVFVoxelVertexFactory, "/EvercoastShaders/EvercoastVoxelVertexFactory_5_5.ush",
+	EVertexFactoryFlags::UsedWithMaterials
+	| EVertexFactoryFlags::SupportsDynamicLighting
+	| EVertexFactoryFlags::SupportsPrimitiveIdStream
+	| EVertexFactoryFlags::SupportsPositionOnly);
+#else
 IMPLEMENT_VERTEX_FACTORY_TYPE(FMVFVoxelVertexFactory, "/EvercoastShaders/EvercoastVoxelVertexFactory.ush", 
 	EVertexFactoryFlags::UsedWithMaterials
 	| EVertexFactoryFlags::SupportsDynamicLighting
 	| EVertexFactoryFlags::SupportsPrimitiveIdStream
 	| EVertexFactoryFlags::SupportsPositionOnly);
+#endif
+
 #else
 IMPLEMENT_VERTEX_FACTORY_PARAMETER_TYPE(FMVFVoxelVertexFactory, SF_Vertex, FMVFVoxelVertexFactoryShaderParameters);
 IMPLEMENT_VERTEX_FACTORY_TYPE_EX(FMVFVoxelVertexFactory, "/EvercoastShaders/EvercoastVoxelVertexFactory.ush", true, false, true, true, true, false, false);

@@ -66,7 +66,7 @@ public:
 #endif
     }
 
-    void SetFilterTexture(FRHICommandList& RHICmdList, const FTexture2DRHIRef Texture)
+    void SetFilterTexture(FRHICommandList& RHICmdList, const FTextureRHIRef Texture)
     {
         FVector2f Size(Texture->GetSizeX(), Texture->GetSizeY());
 #if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 3
@@ -132,7 +132,7 @@ public:
 #endif
     }
 
-    void SetFilterTexture(FRHICommandList& RHICmdList, const FTexture2DRHIRef Texture)
+    void SetFilterTexture(FRHICommandList& RHICmdList, const FTextureRHIRef Texture)
     {
         FVector2f Size(Texture->GetSizeX(), Texture->GetSizeY());
 #if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 3
@@ -182,7 +182,7 @@ public:
 #endif
     }
 
-    void SetSourceTexture(FRHICommandList& RHICmdList, const FTexture2DRHIRef Texture)
+    void SetSourceTexture(FRHICommandList& RHICmdList, const FTextureRHIRef Texture)
     {
 #if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 3
         FRHIBatchedShaderParameters& BatchedParameters = RHICmdList.GetScratchShaderParameters();

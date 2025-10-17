@@ -271,7 +271,11 @@ int32 UPicoAudioSoundWave::GeneratePCMData(uint8* PCMData, const int32 SamplesNe
 			}
 			
 			FMemory::Memcpy((void*)PCMData, &m_audioBuffer[0], BytesToCopy);
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 5
+			m_audioBuffer.RemoveAt(0, BytesToCopy, EAllowShrinking::No);
+#else
 			m_audioBuffer.RemoveAt(0, BytesToCopy, false);
+#endif
 
 			if (SamplesAvailable < SamplesNeeded)
 			{

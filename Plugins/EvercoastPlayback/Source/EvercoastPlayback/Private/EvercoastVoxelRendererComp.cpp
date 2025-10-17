@@ -22,6 +22,10 @@
 #endif
 #endif
 
+static FName s_EyeAdaptationCorrectionMaterialParameterNames[] = {
+	FName(TEXT("TexelEmission")),
+	FName(TEXT("CorrectionIntensity")),
+};
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 // UEvercoastVoxelRendererComp
@@ -70,6 +74,9 @@ FPrimitiveSceneProxy* UEvercoastVoxelRendererComp::CreateSceneProxy()
 			VoxelMaterialDynamic = CreateAndSetMaterialInstanceDynamicFromMaterial(0, VoxelMaterial);
 		else
 			VoxelMaterialDynamic = CreateAndSetMaterialInstanceDynamicFromMaterial(0, UMaterial::GetDefaultMaterial(MD_Surface));
+
+		CheckEyeAdaptationCorrectionMaterialParams();
+		ApplyEyeAdaptationCorrectionMaterialParams();
 
 		if (bGenerateNormal)
 		{
@@ -199,6 +206,9 @@ void UEvercoastVoxelRendererComp::SetVoxelData(std::shared_ptr<EvercoastLocalVox
 		else
 			VoxelMaterialDynamic = CreateAndSetMaterialInstanceDynamicFromMaterial(0, UMaterial::GetDefaultMaterial(MD_Surface));
 
+		CheckEyeAdaptationCorrectionMaterialParams();
+		ApplyEyeAdaptationCorrectionMaterialParams();
+
 		if (SceneProxy)
 		{
 			((FEvercoastVoxelSceneProxy*)SceneProxy)->ResetMaterial(VoxelMaterialDynamic);
@@ -240,6 +250,9 @@ void UEvercoastVoxelRendererComp::SetVoxelMaterial(UMaterialInterface* newMateri
 		else
 			VoxelMaterialDynamic = CreateAndSetMaterialInstanceDynamicFromMaterial(0, UMaterial::GetDefaultMaterial(MD_Surface));
 
+		CheckEyeAdaptationCorrectionMaterialParams();
+		ApplyEyeAdaptationCorrectionMaterialParams();
+
 		MarkRenderStateDirty();
 
 		if (SceneProxy)
@@ -247,6 +260,48 @@ void UEvercoastVoxelRendererComp::SetVoxelMaterial(UMaterialInterface* newMateri
 			((FEvercoastVoxelSceneProxy*)SceneProxy)->ResetMaterial(VoxelMaterialDynamic);
 		}
 	}
+}
+
+void UEvercoastVoxelRendererComp::ApplyEyeAdaptationCorrectionMaterialParams()
+{
+	if (VoxelMaterialDynamic && bIsEyeAdaptationCorrectedMaterial)
+	{
+		VoxelMaterialDynamic->SetScalarParameterValue(FName(TEXT("TexelEmission")), PostEyeAdaptationCorrectionTexelEmission);
+		VoxelMaterialDynamic->SetScalarParameterValue(FName(TEXT("CorrectionIntensity")), EyeAdaptationCorrectionIntensity);
+	}
+}
+
+
+void UEvercoastVoxelRendererComp::CheckEyeAdaptationCorrectionMaterialParams()
+{
+	if (VoxelMaterialDynamic)
+	{
+		int expectedParamCount = sizeof(s_EyeAdaptationCorrectionMaterialParameterNames) / sizeof(FName);
+		int matchedParamCount = 0;
+		// Check one parameter
+		TArray<FMaterialParameterInfo> paramInfos;
+		TArray<FGuid> paramGuid;
+		VoxelMaterialDynamic->GetAllScalarParameterInfo(paramInfos, paramGuid);
+		for (auto& paramInfo : paramInfos)
+		{
+			for (int i = 0; i < expectedParamCount; ++i)
+			{
+				if (paramInfo.Name == s_EyeAdaptationCorrectionMaterialParameterNames[i])
+				{
+					matchedParamCount++;
+					break;
+				}
+			}
+		}
+
+		if (matchedParamCount >= expectedParamCount)
+		{
+			bIsEyeAdaptationCorrectedMaterial = true;
+			return;
+		}
+	}
+
+	bIsEyeAdaptationCorrectedMaterial = false;
 }
 
 #if WITH_EDITOR

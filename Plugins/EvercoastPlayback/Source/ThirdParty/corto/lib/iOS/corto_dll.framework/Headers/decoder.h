@@ -30,6 +30,7 @@ If not, see <http://www.gnu.org/licenses/>.
 #include "vertex_attribute.h"
 #include "color_attribute.h"
 #include "normal_attribute.h"
+#include "SimpleString.h"
 
 
 namespace crt {
@@ -39,9 +40,9 @@ namespace crt {
 class Decoder {
 public:
 	uint32_t nvert, nface;
-	std::map<std::string, std::string> exif; //mtllib ...,
+	std::map<SimpleString, SimpleString> exif; //mtllib ...,
 
-	std::map<std::string, VertexAttribute *> data;
+	std::map<SimpleString, VertexAttribute *> data;
 	IndexAttribute index;
 
 	Decoder(int len, const uchar *input);

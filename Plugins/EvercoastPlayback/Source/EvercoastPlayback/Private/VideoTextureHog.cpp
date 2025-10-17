@@ -17,6 +17,8 @@ void UTextureRecord::InitTexture(int width, int height, int index, EPixelFormat 
 {
 	if (!texture)
 	{
+		//texture = UTexture2D::CreateTransient(width, height, format, *FString::Printf(TEXT("VideoTexture_%s"), GetPixelFormatString(format))) ;
+		// Important: need to let the engine to choose its name, otherwise the update will be wrong
 		texture = UTexture2D::CreateTransient(width, height, format);
 		texture->UpdateResource();
 

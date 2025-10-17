@@ -17,7 +17,7 @@ IMPLEMENT_SHADER_TYPE(, FVoxelWorldNormalGenVS, TEXT("/EvercoastShaders/WorldNor
 IMPLEMENT_SHADER_TYPE(, FVoxelWorldNormalGenPS, TEXT("/EvercoastShaders/WorldNormalGen.usf"), TEXT("MainVoxelPS"), SF_Pixel);
 
 
-void FFlipFilterRenderTarget::DoFilter_Horizontal(const FTexture2DRHIRef& SourceTextureRHI, const FTexture2DRHIRef& DestinationTextureRHI, FRHICommandListImmediate& RHICmdList, IRendererModule* RendererModule)
+void FFlipFilterRenderTarget::DoFilter_Horizontal(const FTextureRHIRef& SourceTextureRHI, const FTextureRHIRef& DestinationTextureRHI, FRHICommandListImmediate& RHICmdList, IRendererModule* RendererModule)
 {
 	RHICmdList.Transition(FRHITransitionInfo(SourceTextureRHI, ERHIAccess::Unknown, ERHIAccess::SRVMask));
 	RHICmdList.Transition(FRHITransitionInfo(DestinationTextureRHI, ERHIAccess::Unknown, ERHIAccess::RTV));
@@ -67,7 +67,7 @@ void FFlipFilterRenderTarget::DoFilter_Horizontal(const FTexture2DRHIRef& Source
 
 }
 
-void FFlipFilterRenderTarget::DoFilter_Vertical(const FTexture2DRHIRef& SourceTextureRHI, const FTexture2DRHIRef& DestinationTextureRHI, FRHICommandListImmediate& RHICmdList, IRendererModule* RendererModule)
+void FFlipFilterRenderTarget::DoFilter_Vertical(const FTextureRHIRef& SourceTextureRHI, const FTextureRHIRef& DestinationTextureRHI, FRHICommandListImmediate& RHICmdList, IRendererModule* RendererModule)
 {
 	RHICmdList.Transition(FRHITransitionInfo(SourceTextureRHI, ERHIAccess::Unknown, ERHIAccess::SRVMask));
 	RHICmdList.Transition(FRHITransitionInfo(DestinationTextureRHI, ERHIAccess::Unknown, ERHIAccess::RTV));
@@ -120,7 +120,7 @@ void FFlipFilterRenderTarget::DoFilter_Vertical(const FTexture2DRHIRef& SourceTe
 }
 
 
-void FFlipFilterRenderTarget::DoFilter_CopyThrough(const FTexture2DRHIRef& SourceTextureRHI, const FTexture2DRHIRef& DestinationTextureRHI, FRHICommandListImmediate& RHICmdList, IRendererModule* RendererModule)
+void FFlipFilterRenderTarget::DoFilter_CopyThrough(const FTextureRHIRef& SourceTextureRHI, const FTextureRHIRef& DestinationTextureRHI, FRHICommandListImmediate& RHICmdList, IRendererModule* RendererModule)
 {
 	// Need this for Vulkan
 	RHICmdList.Transition(FRHITransitionInfo(SourceTextureRHI, ERHIAccess::Unknown, ERHIAccess::SRVMask));

@@ -1,0 +1,796 @@
+#include "/Engine/Public/Platform.ush"
+#include "/Engine/Private/Common.ush"
+
+// GaussianSplatData type
+#include "GaussianSplatTypes.ush"
+#include "GaussianSplatConstants.ush"
+#include "GaussianSplatCommon.ush"
+
+
+#include "Quaternion.ush"
+
+
+#define DO_FLIP_SH_AXIS (0)
+
+///////////////////////
+// DATA FROM CPU
+uint _SplatCount;
+uint _SHDegree;
+uint _SHDim;
+uint4 _SHRender; // x - Diffuse(SH0), y - SH1, z - SH2, w - SH3
+float _PositionScaling;
+ByteAddressBuffer _EncodedSplatPos;
+ByteAddressBuffer _EncodedSplatColA;
+ByteAddressBuffer _EncodedSplatScale;
+ByteAddressBuffer _EncodedSplatRotation;
+ByteAddressBuffer _EncodedSplatSHCoeffs;
+///////////////////////
+
+/////////////////////
+// DECODED DATA
+RWStructuredBuffer<SplatViewData> _SplatViewData;
+/////////////////////
+
+/////////////////////
+// AUX DATA
+RWStructuredBuffer<uint> _TilesTouched; // intermediate buffer, Size=_SplatCount
+/////////////////////
+
+/////////////////////
+// SORTING DATA FOR QUAD RENDERER ONLY
+RWStructuredBuffer<uint> _SortKeyList_A;    // integerized View space Z
+/////////////////////
+
+/////////////////////
+// COMMON DATA
+float4x4 _MatrixObjectToWorld;
+float4x4 _MatrixWorldToObject;
+float4x4 _MatrixV;
+float4x4 _MatrixP;
+float4 _VecScreenParams;  // (screen_width, screen_height, 1/screen_width, 1/screen_height)
+float _Cov2DSqrtKernelSize;
+float3 _CameraPosWS;
+
+/////////////////////
+// FOR QUAD RENDERER ONLY
+float2 _ClipOverrideDecimation; // Greater than 0 means no clipping(for shadowing algorithm)
+float _SplatExtraScale;
+/////////////////////
+
+////////////////////
+// CONST
+static const float _SplatToUnrealUnit = 100.0;
+static const float _UnrealToSplatUnit = 0.01;
+static const float _SplatToUnrealSqrtUnit = 10.0; // for covariance conversion
+/////////////////////
+
+// Keep left handed system, just like rotate around X-axis for -90 degrees
+// This will convert SPZ to Unity but here...
+static const float4x4 RUB_to_RUF = float4x4 (
+    1, 0, 0, 0,
+    0, 0, 1, 0,
+    0, -1, 0, 0,
+    0, 0, 0, 1
+);
+
+// OpenGL, three.js and SPZ format are in RUB (Right-Up-Back) right handed system
+// Unity is in RUF(Right-Up-Front) left handed system
+// Unreal is in FRU(Front-Right-Up) left handed system
+// In order to have position look visually same from RUB(serialized) to FRU(render), simply swap Y<->Z. As a side effect, this will change handness from right handed to left handed.
+static const float4x4 RUB_to_FRU = float4x4 (
+    1, 0, 0, 0,
+    0, 0, 1, 0,
+    0, 1, 0, 0,
+    0, 0, 0, 1
+);
+
+float DecodedFixed24BitInteger(uint encoded24bitsVec)
+{
+    // According to Cyclops
+
+    uint encoded24bits = encoded24bitsVec;
+    int v = (encoded24bits) & 0x00FFFFFF;
+    v |= (v & 0x800000) ? 0xff000000 : 0; // Has most significant bit set? negative or positive
+
+    return ((float)v) * _PositionScaling;
+}
+
+// From: UnityGaussianSplatting https://github.com/aras-p/UnityGaussianSplatting
+// radix sort etc. friendly, see http://stereopsis.com/radix.html
+uint FloatToSortableUint(float f)
+{
+    uint fu = asuint(f);
+    uint mask = -((int)(fu >> 31)) | 0x80000000;
+    return fu ^ mask;
+}
+
+// 16bit is a requirement for later adding tile_id for 32bit radix sorting
+uint FloatToUint16(float f)
+{
+    return f32tof16(f);
+}
+
+float4x4 Matrix3x3To4x4(float3x3 from)
+{
+    return float4x4(
+        float4(from[0], 0.0),
+        float4(from[1], 0.0),
+        float4(from[2], 0.0),
+        float4(0, 0, 0, 0.0)
+        );
+}
+
+
+float3x3 Matrix4x4To3x3(float4x4 from)
+{
+    return float3x3(
+        from[0].xyz,
+        from[1].xyz,
+        from[2].xyz
+        );
+}
+
+float3 DecodePosition(uint index)
+{
+    static const uint ENCODED_SPLAT_POS_STRIDE = 12;
+
+    uint baseByteOffset = index * ENCODED_SPLAT_POS_STRIDE;
+
+    // RWByteAddressBuffer.Load() returns 32 bit uint(4 bytes) so don't use Load3()
+    uint x_bits = _EncodedSplatPos.Load(baseByteOffset);
+    uint y_bits = _EncodedSplatPos.Load(baseByteOffset+4);
+    uint z_bits = _EncodedSplatPos.Load(baseByteOffset+8);
+
+    float3 pos;
+    pos.x = DecodedFixed24BitInteger(x_bits);
+    pos.y = DecodedFixed24BitInteger(y_bits);
+    pos.z = DecodedFixed24BitInteger(z_bits);
+
+    return pos;
+}
+
+float4 DecodeColourAlpha(uint index)
+{
+    static const uint ENCODED_SPLAT_COL_A_STRIDE = 4;
+    // RWByteAddressBuffer.Load() returns 32 bit uint(4 bytes) so don't use Load4()
+    uint rgba = _EncodedSplatColA.Load(index * ENCODED_SPLAT_COL_A_STRIDE);
+
+    // decode 32 bits to respective float values
+    float r = (rgba & 0xFF) / 255.0;
+    float g = ((rgba >> 8) & 0xFF) / 255.0;
+    float b = ((rgba >> 16) & 0xFF) / 255.0;
+    float a = ((rgba >> 24) & 0xFF) / 255.0;
+
+    return float4(r,g,b,a);
+}
+
+float extractScale(uint value) 
+{
+	return exp(float(value) / 16.0 - 10.0);
+}
+
+float3 DecodeScale(uint index)
+{
+    static const uint ENCODED_SPLAT_SCALE_STRIDE = 4;
+
+    uint scale_packed = _EncodedSplatScale.Load(index * ENCODED_SPLAT_SCALE_STRIDE);
+    uint sx = scale_packed & 0xFF;
+    uint sy = (scale_packed >> 8) & 0xFF;
+    uint sz = (scale_packed >> 16) & 0xFF;
+
+    
+    return float3(extractScale(sx), extractScale(sy), extractScale(sz));
+}
+
+float extractRotation(uint value) 
+{
+	return float(value) / 127.5 - 1.0;
+}
+
+float4 DecodeRotation(uint index)
+{
+    static const uint ENCODED_SPLAT_ROTATION_STRIDE = 4;
+
+    uint quat_packed = _EncodedSplatRotation.Load(index * ENCODED_SPLAT_ROTATION_STRIDE);
+
+    uint rx = quat_packed & 0xFF;
+    uint ry = (quat_packed >> 8) & 0xFF;
+    uint rz = (quat_packed >> 16) & 0xFF;
+
+    float4 quat;
+    quat.x = extractRotation(rx);
+    quat.y = extractRotation(ry);
+    quat.z = extractRotation(rz);
+    quat.w = sqrt(1.0 - saturate(dot(quat.xyz, quat.xyz)));
+
+    return quat;
+}
+
+float unquantizeSH(uint x)
+{
+    float val = (((float)x) - 128.0f) / 128.0f;
+    return clamp(val, 0.0, 1.0);
+}
+
+
+static const float flipSH[15] =
+{
+      1,//match_y, // 0
+      -1,//match_z, // 1
+      1,//match_x, // 2
+      1,//match_x * match_y, // 3
+      -1,//match_y * match_z, // 4
+      1, //1.0f, // 5
+      -1, //match_x * match_z, // 6
+      1, //1.0f, // 7
+      1, //match_y, // 8
+      -1, //match_x * match_y * match_z, // 9
+      1, //match_y, // 10
+      -1, //match_z, // 11
+      1, //match_x, // 12
+      -1, //match_z, // 13
+      1, //match_x // 14
+};
+
+
+// Decoded SH coeffs ranges [-1.0, 1.0]
+float3 DecodeSHCoeffs(uint index, uint sh_coeff_index)
+{
+    const uint ENCODED_SPLAT_SHCOEFFS_STRIDE = _SHDim * 4;
+    const uint SHCOEFF_STRIDE = 4;
+    uint shcoeffs_packed = _EncodedSplatSHCoeffs.Load(index * ENCODED_SPLAT_SHCOEFFS_STRIDE + sh_coeff_index * SHCOEFF_STRIDE);
+    
+    // R in the lowest bit in little endian
+    uint sh_r = (shcoeffs_packed >> 0) & 0xFF;
+    uint sh_g = (shcoeffs_packed >> 8) & 0xFF;
+    uint sh_b = (shcoeffs_packed >> 16) & 0xFF;
+    
+
+    // FIXME: flip axis for Unreal coordinate
+    // convert quantized 8 bit integer back to float
+#if DO_FLIP_SH_AXIS
+    return float3(unquantizeSH(sh_r), unquantizeSH(sh_g), unquantizeSH(sh_b)) * flipSH[sh_coeff_index];
+#else
+    return float3(unquantizeSH(sh_r), unquantizeSH(sh_g), unquantizeSH(sh_b));
+#endif
+}
+
+
+DecodedSplatData DecodeSplatData(uint index)
+{
+    DecodedSplatData splatData = (DecodedSplatData)0;
+    splatData.pos.xyz = DecodePosition(index).xyz;
+    splatData.pos.w = 1.0;
+    splatData.col_a = DecodeColourAlpha(index);
+    splatData.scale = DecodeScale(index);
+    splatData.quat = DecodeRotation(index);
+    
+    uint NumSHCoeffs = min(_SHDim, MAXIMUM_SH_COEFFS);
+    for (uint i = 0; i < NumSHCoeffs; ++i)
+    {
+        splatData.sh_coeffs[i] = DecodeSHCoeffs(index, i);
+    }
+
+
+    return splatData;
+}
+
+// From: UnityGaussianSplatting https://github.com/aras-p/UnityGaussianSplatting
+void DecomposeCovariance(float3 cov2d, out float2 v1, out float2 v2)
+{
+    // same as in antimatter15/splat
+    float diag1 = cov2d.x, diag2 = cov2d.z, offDiag = cov2d.y;
+    float mid = 0.5f * (diag1 + diag2);
+    float radius = length(float2((diag1 - diag2) / 2.0, offDiag));
+    float lambda1 = mid + radius;
+    float lambda2 = max(mid - radius, 0.1);
+    float2 diagVec = normalize(float2(offDiag, lambda1 - diag1));
+    diagVec.y = -diagVec.y;
+    float maxSize = 4096.0;
+    // Changed from sqrt(2.0 * lambda) to sqrt(lambda) * 3.0
+    // I think that's the correct calculation to cover 3 sigmas
+    v1 = min(sqrt(lambda1) * 3.0, maxSize) * diagVec;
+    v2 = min(sqrt(lambda2) * 3.0, maxSize) * float2(diagVec.y, -diagVec.x);
+}
+
+/* 
+// Clean version
+void DecomposeCovariance_2(float cov2d_X, float cov2d_Y, float cov2d_Z, out float2 axis1, out float2 axis2)
+{
+    float trace = cov2d_X + cov2d_Z;
+    float mid = 0.5 * trace;
+    float delta = sqrt((cov2d_X - cov2d_Z) * (cov2d_X - cov2d_Z) + 4 * cov2d_Y * cov2d_Y);
+    
+    float lambda1 = 0.5f * (trace + delta); // larger eigenvalue
+    float lambda2 = max(0.5f * (trace - delta), 0.1); // smaller eigenvalue
+
+    // Compute eigenvectors
+    axis1 = normalize(float2(cov2d_Y, lambda1 - cov2d_X)); // eigenvector for lambda1
+    axis1.y *= -1;
+    axis2 = float2(axis1.y, -axis1.x); // orthogonal vector
+    
+    float k = 3.0f; // 3 sigma covers 99.7% of the Gaussian energy
+
+    float scale1 = k * sqrt(lambda1); // length along axis1
+    float scale2 = k * sqrt(lambda2); // length along axis2
+
+    axis1 *= scale1;
+    axis2 *= scale2;
+    
+
+}
+*/
+
+// TODO: incroporate it to DecomposeCovariance()
+float DecomposeCovarianceToRadius(float3 cov2d, float det)
+{
+    float mid = 0.5f * (cov2d.x + cov2d.z);
+    float lambda1 = mid + sqrt(max(0.1f, mid * mid - det));
+    float lambda2 = mid - sqrt(max(0.1f, mid * mid - det));
+    float my_radius = ceil(3.f * sqrt(max(lambda1, lambda2)));
+    return my_radius;
+}
+
+float3x3 CalcCovariance2D(float3 in_scale, float4 in_quat, float4 pos_in_view, float4x4 ObjectToWorldMatrix, float4x4 ViewMatrix, float4x4 ProjMatrix, float2 view_size, float flip_y_hack)
+{
+    // Same implementation as original paper's computeCov3D() in forward.cu
+    // Except the original's quaternion has rxyz instead of xyzw like here
+    float3x3 cov;
+
+    float3x3 S = float3x3(
+        in_scale.x,  0.0f,         0.0f,       
+        0.0f,         in_scale.y, 0.0f,         
+        0.0f,         0.0f,         in_scale.z    
+    ) ;
+
+    float x = in_quat.x;
+    float y = in_quat.y;
+    float z = in_quat.z;
+    float w = in_quat.w;
+    // quaternion xyzw to rotation matrix R
+    float3x3 R = float3x3(
+        1-2*(y*y + z*z), 2*(x*y - w*z),   2*(x*z + w*y),
+        2*(x*y + w*z), 1-2*(x*x + z*z),   2*(y*z - w*x),
+        2*(x*z - w*y),   2*(y*z + w*x), 1-2*(x*x + y*y)
+    );   
+
+    float3x3 M = mul(S,R); 
+    float3x3 Sigma = mul(transpose(M),M); //3D world covariance matrix
+    // Covariance 3d = R * diag(Sx^2, Sy^2, Sz^2) * R_t     
+    //float3x3 Sigma = mul(mul(transpose(R), mul(S, S)), R); // remember HLSL to run mul backwards!
+    
+    // End of compute covariance3D
+    
+    // Project covaraiance to 2D
+    // The following models the steps outlined by equations 29
+    // and 31 in "EWA Splatting" (Zwicker et al., 2002).  
+
+    // NOTE: the sign of ProjMatrix[1][1] needs to be flipped for unknown reason
+    float tan_fovy = 1 / ProjMatrix[1][1];
+    float aspect = view_size.x / view_size.y;
+    float tan_fovx = tan_fovy * aspect; // <- correct way of derive tan_fovx from tan_fovy
+    
+    float focal_y = view_size.y / (2.0f * tan_fovy) * flip_y_hack;
+    float focal_x = view_size.x / (2.0f * tan_fovx);
+    
+    float4 t = pos_in_view; //pos in view with limit  
+    float limFactor = 1.3f;
+    float limx = limFactor * tan_fovx;
+    float limy = limFactor * tan_fovy;
+    float txtz = t.x / t.z;
+    float tytz = t.y / t.z;
+    t.x = min(limx, max(-limx, txtz)) * t.z;
+    t.y = min(limy, max(-limy, tytz)) * t.z; 
+
+    float3x3 J = float3x3(
+        focal_x / t.z, 0.0f, -(focal_x * t.x) / (t.z * t.z),
+        0.0f, focal_y / t.z, -(focal_y * t.y) / (t.z * t.z),
+        0, 0, 0);
+
+    float3x3 W = mul(Matrix4x4To3x3(ObjectToWorldMatrix), Matrix4x4To3x3(ViewMatrix));
+    W=transpose(W);
+    
+    //glm::mat3 T = W * J;
+    float3x3 T = mul(J , W); 
+    // Cov2D = J*W*Sigma*W_t*J_t
+    // glm::mat3 cov = glm::transpose(T) * glm::transpose(Vrk) * T;  // NOTE Sigma is symmetric so there's no need to transpose
+    cov = mul( mul(T ,  Sigma), transpose(T)) ;
+    
+    // End of covaraiance 2D projection
+    return cov;
+}
+
+
+// Decimation
+bool IsSplatKept(uint idx, float DecimatedSplatCount)
+{
+    if (DecimatedSplatCount <= 0.0)
+        return true;
+    
+    float step = _SplatCount / DecimatedSplatCount;
+    // Two rounds to deal with rounding issue
+    uint removalSlot = round(idx / step);
+    uint removeAt = round(removalSlot * step);
+    // If matches then this splat is removed
+    return idx != removeAt;
+}
+
+
+float3 ConvertSH0ToRGB(float3 diffuseSH0)
+{
+    // SH0 decode to diffuse
+    // According to Cyclops but removed 0.5 addition for consistency with original algorithm
+    return 0.2820947917739 * (diffuseSH0.xyz * 2.0 - 1.0) / 0.3;
+}
+
+float3 CalcExtraSHToRGB(float3 viewDir, DecodedSplatData decodedSplat, bool calcSHDegree1, bool calcSHDegree2, bool calcSHDegree3)
+{
+    float3 final_colour = 0;
+    const int SH_IDX_OFFSET = -1;
+    
+    // Swizzle will cause handness flip, thus we have flipSH[] when decoding the coeffs
+    viewDir.yz = viewDir.zy;
+    
+    float x = 0, y = 0, z = 0;
+    float xx, yy, zz, xy, yz, xz;
+
+    if (_SHDegree > 0 && calcSHDegree1)
+    {
+        x = viewDir.x;
+        y = viewDir.y;
+        z = viewDir.z;
+        
+        final_colour +=
+            SH_C1 * -y * decodedSplat.sh_coeffs[1 + SH_IDX_OFFSET] +
+            SH_C1 * z * decodedSplat.sh_coeffs[2 + SH_IDX_OFFSET] +
+            SH_C1 * -x * decodedSplat.sh_coeffs[3 + SH_IDX_OFFSET];
+    }
+
+    if (_SHDegree > 1 && calcSHDegree2)
+    {
+        x = viewDir.x;
+        y = viewDir.y;
+        z = viewDir.z;
+        
+        xx = x * x;
+        yy = y * y;
+        zz = z * z;
+        xy = x * y;
+        yz = y * z;
+        xz = x * z;
+            
+        final_colour += (
+			SH_C2[0] * xy * decodedSplat.sh_coeffs[4 + SH_IDX_OFFSET] +
+			SH_C2[1] * yz * decodedSplat.sh_coeffs[5 + SH_IDX_OFFSET] +
+			SH_C2[2] * (2.0f * zz - xx - yy) * decodedSplat.sh_coeffs[6 + SH_IDX_OFFSET] +
+			SH_C2[3] * xz * decodedSplat.sh_coeffs[7 + SH_IDX_OFFSET] +
+			SH_C2[4] * (xx - yy) * decodedSplat.sh_coeffs[8 + SH_IDX_OFFSET]);
+    }
+            
+    if (_SHDegree > 2 && calcSHDegree3)
+    {
+        x = viewDir.x;
+        y = viewDir.y;
+        z = viewDir.z;
+        
+        xx = x * x;
+        yy = y * y;
+        zz = z * z;
+        xy = x * y;
+        yz = y * z;
+        xz = x * z;
+        
+        final_colour += (
+			SH_C3[0] * y * (3.0f * xx - yy) * decodedSplat.sh_coeffs[9 + SH_IDX_OFFSET] +
+			SH_C3[1] * xy * z * decodedSplat.sh_coeffs[10 + SH_IDX_OFFSET] +
+			SH_C3[2] * y * (4.0f * zz - xx - yy) * decodedSplat.sh_coeffs[11 + SH_IDX_OFFSET] +
+			SH_C3[3] * z * (2.0f * zz - 3.0f * xx - 3.0f * yy) * decodedSplat.sh_coeffs[12 + SH_IDX_OFFSET] +
+			SH_C3[4] * x * (4.0f * zz - xx - yy) * decodedSplat.sh_coeffs[13 + SH_IDX_OFFSET] +
+			SH_C3[5] * z * (xx - yy) * decodedSplat.sh_coeffs[14 + SH_IDX_OFFSET] +
+			SH_C3[6] * x * (xx - 3.0f * yy) * decodedSplat.sh_coeffs[15 + SH_IDX_OFFSET]);
+    }
+
+    return final_colour;
+}
+
+// Dummy
+[numthreads(CALC_VIEW_DATA_THREADS, 1, 1)]
+void CSCalcViewDataBase(uint3 DTid : SV_DispatchThreadID)
+{
+}
+
+[numthreads(CALC_VIEW_DATA_THREADS, 1, 1)]
+void CSCalcViewDataForTileRenderer(uint3 DTid : SV_DispatchThreadID)
+{
+    uint idx = DTid.x;
+    if (idx > _SplatCount)
+        return;
+    
+    DecodedSplatData decodedSplat = DecodeSplatData(idx);
+    float4 rotation = decodedSplat.quat.xzyw; // swizzle!
+    float3 scale = decodedSplat.scale.xzy; // swizzle
+    scale *= _SplatToUnrealUnit; // scale
+
+
+    SplatViewData splatView = (SplatViewData)0;
+    float4 convertedLocalPos = mul(float4(decodedSplat.pos.xyz, 1), RUB_to_FRU);
+    convertedLocalPos.xyz *= _SplatToUnrealUnit;
+    splatView.pos = convertedLocalPos;
+
+    float4 pos_in_world = mul(convertedLocalPos, _MatrixObjectToWorld);
+    
+    float4 pos_in_view = mul(pos_in_world, _MatrixV);
+    // For later run GPU sort
+    // Sort front to back for tile renderer
+    uint sortValueUint16 = FloatToUint16(pos_in_view.z);
+    splatView.depth16 = sortValueUint16;
+
+    float4 pos_in_clip_pre_division = mul(pos_in_view, _MatrixP);
+    float4 pos_in_clip = pos_in_clip_pre_division / pos_in_clip_pre_division.w;
+    // Screen space mean position
+    splatView.mean_xy = (pos_in_clip.xy + 1.0) * 0.5 * _VecScreenParams.xy;
+    
+
+    // clipping
+    if (pos_in_clip_pre_division.w <= 0)
+    {
+        _SplatViewData[idx] = (SplatViewData) 0;
+        _TilesTouched[idx] = 0;
+        return;
+    }
+        
+    // if the mean is outside 30% of the screen, clip
+    if (abs(pos_in_clip.x) > 1.3 || abs(pos_in_clip.y) > 1.3)
+    {
+        _SplatViewData[idx] = (SplatViewData) 0;
+        _TilesTouched[idx] = 0;
+        return;
+    }
+
+
+    // Get 2D covariance
+    float3x3 cov = CalcCovariance2D(scale, rotation, pos_in_view, _MatrixObjectToWorld, _MatrixV, _MatrixP, _VecScreenParams.xy, 1.0);
+
+    const float h_var = _Cov2DSqrtKernelSize;
+    
+    float cov2d_X = cov[0][0];
+    float cov2d_Y = cov[0][1];
+    float cov2d_Z = cov[1][1];
+
+    
+    float det_cov = cov2d_X * cov2d_Z - cov2d_Y * cov2d_Y;
+    det_cov = max(1e-11, det_cov); // Guard against precision issues 
+    
+    // Apply low-pass filter, after calculating determinant
+    cov2d_X += h_var;
+    cov2d_Z += h_var;
+    
+    float det_cov_plus_h_cov = cov2d_X * cov2d_Z - cov2d_Y * cov2d_Y;
+
+    float h_convolution_scaling = 1.0f;
+
+    h_convolution_scaling = sqrt(max(0.000025f, det_cov / det_cov_plus_h_cov)); // max for numerical stability
+    
+    // Invert covariance (EWA algorithm)
+    const float det = det_cov_plus_h_cov;
+
+    if (det == 0.0f)
+    {
+        _SplatViewData[idx] = (SplatViewData)0;
+        _TilesTouched[idx] = 0;
+        return;
+    }
+    
+    float det_inv = 1.0 / det;
+    
+    float3 conic = float3(cov2d_Z, -cov2d_Y, cov2d_X) * det_inv;
+    
+    // Now axis1 and axis2 seems to be correct with proper 3-Sigma coverage
+    float3 cov2d = float3(cov2d_X, cov2d_Y, cov2d_Z);
+
+    splatView.conic = float4(conic, decodedSplat.col_a.a * h_convolution_scaling);
+    
+    // Get tile index range, and stored into SplatView for later sorting purpose with tile_id
+    uint2 TileIdxRangeMin, TileIdxRangeMax;
+    
+    // TODO: precompute this
+    uint W = (uint) _VecScreenParams.x;
+    uint H = (uint) _VecScreenParams.y;
+    uint horizontal_tile_count = (W + TILE_SIZE - 1) / TILE_SIZE; // RoundUp(W / TileSize)
+    uint vertical_tile_count = (H + TILE_SIZE - 1) / TILE_SIZE; // RoundUp(W / TileSize)
+    
+    // Radius for true volume rendering
+    float my_radius = DecomposeCovarianceToRadius(cov2d, det);
+    CalcTileIndexRange(splatView.mean_xy, my_radius, TileIdxRangeMin, TileIdxRangeMax, uint2(TILE_SIZE, TILE_SIZE), uint2(horizontal_tile_count, vertical_tile_count));
+    splatView.radii_clipz = float2(my_radius, pos_in_clip.z);
+    
+    float3 final_colour = 0;
+    float COLOUR_OFFSET = 0.5;
+    
+    if (_SHRender.x > 0)
+    {
+        final_colour += ConvertSH0ToRGB(decodedSplat.col_a.xyz);
+    }
+     
+    if (dot(_SHRender.yzw, _SHRender.yzw) > 0)
+    {
+        float3 viewDir = normalize(pos_in_world.xyz - _CameraPosWS);
+        viewDir = mul(viewDir, (float3x3)_MatrixWorldToObject); // viewDir needs to be in obj space
+        final_colour += CalcExtraSHToRGB(viewDir, decodedSplat, _SHRender.y > 0, _SHRender.z > 0, _SHRender.w > 0);
+    }
+    
+    final_colour += COLOUR_OFFSET;
+    
+    splatView.diffuse_opacity.rgb = final_colour;
+    
+    // sRGB is a gamma-encoded color space (approx gamma 2.2). To convert from linear to sRGB, Unreal applies a gamma correction, roughly
+    // sRGB = pow(linear, 1/2.2)
+    // So usually Unreal expect an input of linear colour so that the gamma correction to sRGB goes as it expected.
+    // But here we recon the Gaussian using sRGB colours so we need to write raw sRGB value too, so we'll have to do the inversion like pow(color, 2.2)
+    // However the inverse Gamma compensation will be handled in Material Editor, for debugging reason
+    
+    // FIXME: for tile renderer this Gamma compensation will either be here or in the tile renderer
+    splatView.diffuse_opacity.a = decodedSplat.col_a.a * h_convolution_scaling;
+    
+    // Store how many tiles covered by this splat
+    splatView.tile_idx_ranges.xy = TileIdxRangeMin.xy;
+    splatView.tile_idx_ranges.zw = TileIdxRangeMax.xy;
+    
+    _TilesTouched[idx] = (TileIdxRangeMax.y - TileIdxRangeMin.y) * (TileIdxRangeMax.x - TileIdxRangeMin.x);
+    
+    _SplatViewData[idx] = splatView;
+
+    // NOT USED BY TILE RENDERER:
+    //splatView.axis1
+    //splatView.axis2
+    //_SortKeyList_A
+}
+
+
+
+[numthreads(CALC_VIEW_DATA_THREADS, 1, 1)]
+void CSCalcViewDataForQuadRenderer(uint3 DTid : SV_DispatchThreadID)
+{
+    uint idx = DTid.x;
+    if (idx > _SplatCount)
+        return;
+    
+    float decimatedSplatCount = round(_SplatCount * _ClipOverrideDecimation.y);
+    if (!IsSplatKept(idx, decimatedSplatCount))
+    {
+        _SplatViewData[idx] = (SplatViewData) 0;
+        return;
+    }
+    
+    DecodedSplatData decodedSplat = DecodeSplatData(idx);
+    float4 rotation = decodedSplat.quat.xzyw; // swizzle!
+    float3 scale = decodedSplat.scale.xzy; // swizzle
+    scale *= _SplatToUnrealUnit; // scale
+
+
+    SplatViewData splatView = (SplatViewData) 0;
+    float4 convertedLocalPos = mul(float4(decodedSplat.pos.xyz, 1), RUB_to_FRU);
+    convertedLocalPos.xyz *= _SplatToUnrealUnit;
+    splatView.pos = convertedLocalPos;
+
+    float4 pos_in_world = mul(convertedLocalPos, _MatrixObjectToWorld);
+    
+    float4 pos_in_view = mul(pos_in_world, _MatrixV);
+    // For later run GPU sort
+    // Sort back to front for quad renderer
+    uint sortValueUint32 = FloatToSortableUint(pos_in_view.z);
+    _SortKeyList_A[idx] = 0xffffffff - sortValueUint32;
+
+    float4 pos_in_clip_pre_division = mul(pos_in_view, _MatrixP);
+    float4 pos_in_clip = pos_in_clip_pre_division / pos_in_clip_pre_division.w;
+    // Screen space mean position
+    splatView.mean_xy = (pos_in_clip.xy + 1.0) * 0.5 * _VecScreenParams.xy;
+    
+
+    // clipping
+    if (_ClipOverrideDecimation.x <= 0) // only when clipping is needed
+    {
+        if (pos_in_clip_pre_division.w <= 0)
+        {
+            _SplatViewData[idx] = (SplatViewData) 0;
+            return;
+        }
+        
+        // if the mean is outside 30% of the screen, clip
+        if (abs(pos_in_clip.x) > 1.3 || abs(pos_in_clip.y) > 1.3)
+        {
+            _SplatViewData[idx] = (SplatViewData) 0;
+            return;
+        }
+    }
+
+
+    // Get 2D covariance
+    float3x3 cov = CalcCovariance2D(scale, rotation, pos_in_view, _MatrixObjectToWorld, _MatrixV, _MatrixP, _VecScreenParams.xy, -1.0);
+
+    const float h_var = _Cov2DSqrtKernelSize;
+    
+    float cov2d_X = cov[0][0];
+    float cov2d_Y = cov[0][1];
+    float cov2d_Z = cov[1][1];
+
+    
+    float det_cov = cov2d_X * cov2d_Z - cov2d_Y * cov2d_Y;
+    det_cov = max(1e-11, det_cov); // Guard against precision issues 
+    
+    // Apply low-pass filter, after calculating determinant
+    cov2d_X += h_var;
+    cov2d_Z += h_var;
+    
+    float det_cov_plus_h_cov = cov2d_X * cov2d_Z - cov2d_Y * cov2d_Y;
+
+    float h_convolution_scaling = 1.0f;
+
+    h_convolution_scaling = sqrt(max(0.000025f, det_cov / det_cov_plus_h_cov)); // max for numerical stability
+    
+    // Invert covariance (EWA algorithm)
+    const float det = det_cov_plus_h_cov;
+
+    if (det == 0.0f)
+    {
+        _SplatViewData[idx] = (SplatViewData) 0;
+        return;
+    }
+    
+    float det_inv = 1.0 / det;
+    
+    float3 conic = float3(cov2d_Z, -cov2d_Y, cov2d_X) * det_inv;
+    
+    // Now axis1 and axis2 seems to be correct with proper 3-Sigma coverage
+    float3 cov2d = float3(cov2d_X, cov2d_Y, cov2d_Z);
+    DecomposeCovariance(cov2d, splatView.axis1, splatView.axis2); // both version work
+    //DecomposeCovariance_2(cov2d_X, cov2d_Y, cov2d_Z, splatView.axis1, splatView.axis2);
+        
+    const float extraScale = _SplatExtraScale;
+    // This will affect the quad size but will not affect the calculation of mahal distance falloff
+    // With the 3-sigma axis correction the extra scale hack should be useless, kept here only for debug reason
+    // Axis for native quad-based splat realtime rendering
+    splatView.axis1 = splatView.axis1 * pos_in_view.z / _VecScreenParams.xy * extraScale;
+    splatView.axis2 = splatView.axis2 * pos_in_view.z / _VecScreenParams.xy * extraScale;
+
+    splatView.conic = float4(conic, decodedSplat.col_a.a * h_convolution_scaling);
+    
+    // Get tile index range, and stored into SplatView for later sorting purpose with tile_id
+    uint2 TileIdxRangeMin, TileIdxRangeMax;
+    
+    float3 final_colour = 0;
+    float COLOUR_OFFSET = 0.5;
+    
+    if (_SHRender.x > 0)
+    {
+        final_colour += ConvertSH0ToRGB(decodedSplat.col_a.xyz);
+    }
+     
+    if (dot(_SHRender.yzw, _SHRender.yzw) > 0)
+    {
+        float3 viewDir = normalize(pos_in_world.xyz - _CameraPosWS);
+        viewDir = mul(viewDir, (float3x3) _MatrixWorldToObject); // viewDir needs to be in obj space
+        final_colour += CalcExtraSHToRGB(viewDir, decodedSplat, _SHRender.y > 0, _SHRender.z > 0, _SHRender.w > 0);
+    }
+    
+    final_colour += COLOUR_OFFSET;
+    
+    splatView.diffuse_opacity.rgb = final_colour;
+    
+    // sRGB is a gamma-encoded color space (approx gamma 2.2). To convert from linear to sRGB, Unreal applies a gamma correction, roughly
+    // sRGB = pow(linear, 1/2.2)
+    // So usually Unreal expect an input of linear colour so that the gamma correction to sRGB goes as it expected.
+    // But here we recon the Gaussian using sRGB colours so we need to write raw sRGB value too, so we'll have to do the inversion like pow(color, 2.2)
+    // However the inverse Gamma compensation will be handled in Material Editor, for debugging reason
+    
+    // FIXME: for tile renderer this Gamma compensation will either be here or in the tile renderer
+    splatView.diffuse_opacity.a = decodedSplat.col_a.a * h_convolution_scaling;
+    
+    _SplatViewData[idx] = splatView;
+
+    // NOT USED IN QUAD RENDERER:
+    //splatView.depth16
+    //splatView.tile_idx_ranges;
+    //splatView.radii_clipz;
+    //_TilesTouched
+}

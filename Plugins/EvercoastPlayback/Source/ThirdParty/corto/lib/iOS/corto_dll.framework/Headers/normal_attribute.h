@@ -21,6 +21,7 @@ If not, see <http://www.gnu.org/licenses/>.
 
 #include "point.h"
 #include "vertex_attribute.h"
+#include "SimpleString.h"
 
 /* encoding sequence for Estimated
  * quantize: convert to octa and quantize. stored to values
@@ -56,13 +57,13 @@ public:
 	virtual int codec() { return NORMAL_CODEC; }
 	//return number of bits
 	virtual void quantize(uint32_t nvert, const char *buffer);
-	virtual void preDelta(uint32_t nvert,  uint32_t nface, std::map<std::string, VertexAttribute *> &attrs, IndexAttribute &index);
+	virtual void preDelta(uint32_t nvert,  uint32_t nface, std::map<SimpleString, VertexAttribute *> &attrs, IndexAttribute &index);
 	virtual void deltaEncode(std::vector<Quad> &context);
 	virtual void encode(uint32_t nvert, OutStream &stream);
 
 	virtual void decode(uint32_t nvert, InStream &stream);
 	virtual void deltaDecode(uint32_t nvert, std::vector<Face> &context);
-	virtual void postDelta(uint32_t nvert,  uint32_t nface, std::map<std::string, VertexAttribute *> &attrs, IndexAttribute &index);
+	virtual void postDelta(uint32_t nvert,  uint32_t nface, std::map<SimpleString, VertexAttribute *> &attrs, IndexAttribute &index);
 	virtual void dequantize(uint32_t nvert);
 
 	//Normal estimation

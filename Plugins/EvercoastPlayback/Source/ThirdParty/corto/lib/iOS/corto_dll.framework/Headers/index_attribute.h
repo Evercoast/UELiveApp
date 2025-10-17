@@ -20,6 +20,7 @@ If not, see <http://www.gnu.org/licenses/>.
 #define CRT_INDEX_ATTRIBUTE_H
 
 #include "cstream.h"
+#include "SimpleString.h"
 
 namespace crt {
 
@@ -39,7 +40,7 @@ struct Face {
 
 struct Group {
 	uint32_t end; //1+ last face
-	std::map<std::string, std::string> properties;
+	std::map<SimpleString, SimpleString> properties;
 
 	Group() {}
 	Group(uint32_t e): end(e) {}
@@ -87,13 +88,14 @@ public:
 	}
 
 	void decodeGroups(InStream &stream) {
-		groups.resize(stream.readUint32());
+        uint32_t groupSize = stream.readUint32();
+		groups.resize(groupSize);
 		for(Group &g: groups) {
 			g.end = stream.readUint32();
 			uchar size = stream.readUint8();
 			for(uint32_t i = 0; i < size; i++) {
-				const char *key = stream.readString();
-				g.properties[key] = stream.readString();
+				SimpleString key = stream.readString();
+				g.properties[key] = SimpleString(stream.readString());
 			}
 		}
 	}

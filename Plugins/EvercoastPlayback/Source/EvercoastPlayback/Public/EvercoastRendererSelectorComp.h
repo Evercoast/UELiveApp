@@ -12,8 +12,7 @@ class UEvercoastVoxelRendererComp;
 class UEvercoastMVFVoxelRendererComp;
 class IVoxelRendererComponent;
 class UCortoMeshRendererComp;
-class UEvercoastGaussianSplatRendererComp;
-class UEvercoastGaussianSplatComputeComponent;
+class UEvercoastGaussianSplatCSRendererComp;
 class UEvercoastGaussianSplatShadowCasterComp;
 
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
@@ -79,7 +78,7 @@ private:
 	UCortoMeshRendererComp* m_meshRenderer;
 	// .ecz gaussian splat renderer
 	UPROPERTY()
-	UEvercoastGaussianSplatComputeComponent* m_gaussianRenderer;
+	UEvercoastGaussianSplatCSRendererComp* m_gaussianRenderer;
 	// .ecz gaussian splat shadow caster
 	UPROPERTY()
 	UEvercoastGaussianSplatShadowCasterComp* m_gaussianShadowCaster;

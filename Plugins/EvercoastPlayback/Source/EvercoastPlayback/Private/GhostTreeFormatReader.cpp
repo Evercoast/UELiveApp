@@ -486,6 +486,7 @@ UGhostTreeFormatReader::UGhostTreeFormatReader(const FObjectInitializer&) :
 	m_currMode(OperatingMode::None),
 	m_isMesh(false),
 	m_isMeshWithNormals(false),
+	m_isGaussianSplats(false),
 	m_mainChannelId(-1),
 	m_mainChannelSampleRate(0),
 	m_audioChannelId(-1),
@@ -1308,25 +1309,6 @@ void UGhostTreeFormatReader::OnBlockReceived(ChannelDataBlock data_block)
 
 			UE_LOG(EvercoastReaderLog, Warning, TEXT("Main channel: %d has not been assigned decoder! Throw away block: %d"), data_block.channel_id, data_block.block_id);
 
-			/*
-			// Try feed raw bytes to zstd
-			auto decompressedSize = ZSTD_getFrameContentSize(data, data_size);
-			if (decompressedSize == ZSTD_CONTENTSIZE_ERROR || decompressedSize == ZSTD_CONTENTSIZE_UNKNOWN)
-			{
-				UE_LOG(EvercoastReaderLog, Error, TEXT("Getting frame compressed metadata error. Data: %P, Size: %d"), data, data_size);
-			}
-			else
-			{
-				uint8_t* rawBytes = new uint8_t[decompressedSize];
-				auto actualDecompressedSize = ZSTD_decompress(rawBytes, decompressedSize, data, data_size);
-
-				// rawBytes should contain an ECSPZ frame
-				ECSpzHeader* header = (ECSpzHeader*)rawBytes;
-				UE_LOG(EvercoastReaderLog, Log, TEXT("SPZ header magic: 0x%08x version: %d pointCount: %d frameNumber: %d"), header->magic, header->version, header->pointCount, header->frameNumber);
-				delete[] rawBytes;
-			}
-			*/
-
 			// Not supported codec/or in validation process, (no data decoder) throw the block to m_pendingDataBlocksToRelease
 			std::lock_guard<std::recursive_mutex> guard(m_pendingReleaseBlocksLock);
 
@@ -1621,11 +1603,21 @@ bool UGhostTreeFormatReader::OpenFromLocation(const FString& urlOrFilePath, Read
 
 	m_dataURL = TCHAR_TO_ANSI(*urlOrFilePath);
 	m_dataDecoder = dataDecoder.get();
+
+	m_isMesh = false;
+	m_isMeshWithNormals = false;
+	m_isGaussianSplats = false;
+
 	if (urlOrFilePath.EndsWith(".ecm"))
 	{
 		m_isMesh = true;
 		m_isMeshWithNormals = false; // defaultly we don't have normals
 	}
+	else if (urlOrFilePath.EndsWith(".ecz"))
+	{
+		m_isGaussianSplats = true;
+	}
+
 	m_mainChannelId = -1;
 	m_audioChannelId = -1;
 	m_currRepresentationId = -1;
@@ -1818,6 +1810,11 @@ bool UGhostTreeFormatReader::IsMeshDataWithNormal() const
 bool UGhostTreeFormatReader::MeshRequiresExternalData() const
 {
 	return m_isMesh && m_textureChannelId == -1;
+}
+
+bool UGhostTreeFormatReader::IsGaussianSplatData() const
+{
+	return m_isGaussianSplats;
 }
 
 bool UGhostTreeFormatReader::IsInSeeking() const

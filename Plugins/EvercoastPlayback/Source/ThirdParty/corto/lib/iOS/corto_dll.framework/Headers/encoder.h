@@ -30,6 +30,7 @@ If not, see <http://www.gnu.org/licenses/>.
 #include "vertex_attribute.h"
 #include "color_attribute.h"
 #include "normal_attribute.h"
+#include "SimpleString.h"
 
 namespace crt {
 
@@ -37,12 +38,12 @@ class Encoder {
 public:
 
 	uint32_t nvert, nface;
-	std::map<std::string, std::string> exif; //mtllib ...,
+	std::map<SimpleString, SimpleString> exif; //mtllib ...,
 
 	IndexAttribute index;
 	std::vector<Group> groups;
 
-	std::map<std::string, VertexAttribute *> data;
+	std::map<SimpleString, VertexAttribute *> data;
 	int header_size;
 
 	OutStream stream;
@@ -72,7 +73,7 @@ public:
 	bool addAttribute(const char *name, char *buffer, VertexAttribute *attr);
 
 	void addGroup(int end_triangle) { index.groups.push_back(Group(end_triangle)); }
-	void addGroup(int end_triangle, std::map<std::string, std::string> &props) {
+	void addGroup(int end_triangle, std::map<SimpleString, SimpleString> &props) {
 		Group g(end_triangle);
 		g.properties = props;
 		index.groups.push_back(g);

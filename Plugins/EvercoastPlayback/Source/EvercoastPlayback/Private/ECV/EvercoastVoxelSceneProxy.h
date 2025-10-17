@@ -44,7 +44,13 @@ public:
 	virtual bool HasRayTracingRepresentation() const override { return true; }
 #endif
 
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 5
+	virtual void GetDynamicRayTracingInstances(FRayTracingInstanceCollector& Collector) override;
+#else
 	virtual void GetDynamicRayTracingInstances(FRayTracingMaterialGatheringContext& Context, TArray<FRayTracingInstance>& OutRayTracingInstances) override;
+#endif
+
 #endif
 
 	virtual uint32 GetMemoryFootprint(void) const override;

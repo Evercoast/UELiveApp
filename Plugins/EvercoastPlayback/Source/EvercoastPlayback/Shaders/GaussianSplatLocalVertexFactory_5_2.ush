@@ -26,6 +26,7 @@ StructuredBuffer<SplatViewData> _SplatViewData;
 StructuredBuffer<uint> _InstanceIdToSortedId_A;  // corresponds to _SortValueList from compute shader
 StructuredBuffer<uint> _InstanceIdToSortedId_B;
 uint _InstanceIdToSortId_Select;
+float _ShadowBlobScale;
 
 // Assume inst_id < _NumSplats, this is the main interface to retrieve sorted SplatView
 SplatViewData GetSortedSplatView(uint inst_id)
@@ -133,7 +134,7 @@ struct FPositionAndNormalOnlyVertexFactoryInput
 struct FVertexFactoryIntermediates
 {
 	// Copied from ParticleSpriteVertexFactory.ush
-	/** The position of the splat in local space. */
+	/** The position of the splat in local space(means). */
 	float3 SplatLocalPosition;
 	/** The position of the quad vertex in local space. */
 	float3 QuadVertexLocalPosition;
@@ -241,17 +242,18 @@ FMaterialVertexParameters GetMaterialVertexParameters(FVertexFactoryInput Input,
 	#if NUM_MATERIAL_TEXCOORDS_VERTEX
 		#if NUM_MATERIAL_TEXCOORDS_VERTEX > 0
 			Result.TexCoords[0] = Intermediates.ConicAlpha.xy;
-			//Result.TexCoords[0] = Intermediates.QuadVertexLocalPosition.xy;
 		#endif
 		#if NUM_MATERIAL_TEXCOORDS_VERTEX > 1
 			Result.TexCoords[1] = Intermediates.ConicAlpha.zw;
-			//Result.TexCoords[1] = Intermediates.QuadVertexLocalPosition.zz;
 		#endif
 		#if NUM_MATERIAL_TEXCOORDS_VERTEX > 2
 			Result.TexCoords[2] = Intermediates.SplatMeanWorldPosition.xy;
 		#endif
 		#if NUM_MATERIAL_TEXCOORDS_VERTEX > 3
 			Result.TexCoords[3] = Intermediates.SplatMeanWorldPosition.zz;
+		#endif
+		#if NUM_MATERIAL_TEXCOORDS_VERTEX > 4
+			Result.TexCoords[4] = Intermediates.QuadVertexLocalPosition.xz;
 		#endif
 
 	#endif
@@ -321,12 +323,9 @@ SplatWorldView CalcSplatVertexWorldPosition(float3 SplatLocalPosition, float3 Qu
 
 	float3 TangentRight, TangentUp;
 
-	// CAREFUL: is this transform to world space working???
 	FLWCVector3 worldPosLWC = TransformLocalToWorld(SplatLocalPosition.xyz, LocalToWorld);
 	Result.SplatMeanWorldPosition = LWCToFloat(worldPosLWC);
 
-	//float3 SplatWorldPosition3 = LWCToFloat(worldPosLWC);
-	//float4 SplatWorldPosition = float4(SplatWorldPosition3, 1.0);
 	float4 SplatWorldPosition = TransformLocalToTranslatedWorld(SplatLocalPosition.xyz, LocalToWorld);
 	float4 SplatViewPosition = mul(SplatWorldPosition, ResolvedView.TranslatedWorldToView);
 
@@ -335,19 +334,9 @@ SplatWorldView CalcSplatVertexWorldPosition(float3 SplatLocalPosition, float3 Qu
 	float4 SplatClipPosition = mul(SplatWorldPosition, ResolvedView.TranslatedWorldToClip);
 	float3 quadLocalPosition = QuadVertexLocalPosition.xyz;
 
-	//float4 DBG_rotation = SplatView.DBG_rotation;
-	//float4 DBG_scale = SplatView.DBG_scale;
-
-	//float4x4 DBG_RS = SplatView.DBG_RS;
-
-#if 1
 	// Calc clip space offset using axis1 and axis2
-	//float2 deltaScreenPos = (quadLocalPosition.x * SplatView.axis1 + quadLocalPosition.z * SplatView.axis2) * 2 * 2 * ResolvedView.ViewSizeAndInvSize.zw;
-	//SplatClipPosition.xy += deltaScreenPos * SplatClipPosition.w;
+	// NOTE: the quad defined in SceneProxy is using FRU coordinate system(left handed, x forward & Z up)
 	SplatClipPosition.xy += (quadLocalPosition.x * SplatView.axis1 + quadLocalPosition.z * SplatView.axis2);
-	
-
-
 
 	// Also change TangentRight and TangentUp to be normalized SplatView.axis1 and SplatView.axis2 in world space
 	TangentRight = mul(float3(SplatView.axis1.xy, 0.0), (float3x3)ResolvedView.ClipToTranslatedWorld);
@@ -358,46 +347,7 @@ SplatWorldView CalcSplatVertexWorldPosition(float3 SplatLocalPosition, float3 Qu
 	// Back to world space
 	SplatWorldPosition = mul(SplatClipPosition, ResolvedView.ClipToTranslatedWorld);
 
-#else
-	// Offset just using world space axis
-	float3 CameraUp = ResolvedView.ViewUp;
-	float3 CameraRight = ResolvedView.ViewRight;
 
-	float R = SplatView.spr_size_rot.z;
-	float cosR = cos(R);
-    float sinR = sin(R);
-    float2x2 rot2D = float2x2(
-        cosR, -sinR,
-        sinR,  cosR
-    );
-
-	float2 quadLocalPositionRotated = mul(quadLocalPosition.xz, rot2D);
-
-	float2 SpriteSizeXY = SplatView.spr_size_rot.xy;
-	float3 upOffset = CameraUp * quadLocalPositionRotated.y * SpriteSizeXY.y;
-	float3 rightOffset = CameraRight * quadLocalPositionRotated.x * SpriteSizeXY.x;
-	SplatWorldPosition.xyz += upOffset + rightOffset;
-
-	// Tangent
-	GetWorldTangents(LWCPromote(SplatWorldPosition.xyz), 0, TangentRight, TangentUp);
-#endif
-
-	// DEBUG: apply CS computed world space rotation+scale to quad
-	//float3 quadPosRotateScaled = mul(quadLocalPosition, (float3x3)DBG_RS);
-	//SplatWorldPosition.xyz += quadPosRotateScaled;
-
-	// DEBUG: apply CS computed cov3d vectors to quad
-	//float3 quadPosOffsetByCov3d = quadLocalPosition * SplatView.DBG_cov3d0.xyz + quadLocalPosition * SplatView.DBG_cov3d1.xyz;
-	//SplatWorldPosition.xyz += quadPosOffsetByCov3d;
-
-	// DEBUG: apply CS computed cov2d to quad
-	//float3 quadPosOffsetByCov2d = quadLocalPosition.xyz * SplatView.DBG_cov2d.xyz;
-	//SplatWorldPosition.xyz += quadPosOffsetByCov2d;
-
-	// DEBUG: apply CS computed axis1 and axis2 to quad
-	//float3 quadPosOffsetByAxis12 = float3(SplatView.axis1.x * quadLocalPosition.x, 0, SplatView.axis1.y * quadLocalPosition.z) + float3(SplatView.axis2.x * quadLocalPosition.x, 0, SplatView.axis2.y * quadLocalPosition.z);
-	//SplatWorldPosition.xyz += quadPosOffsetByAxis12;
-	
 	Result.SplatWorldPosition = SplatWorldPosition;
 	Result.SplatViewPosition = SplatViewPosition;
 	Result.SplatClipPosition = mul(SplatWorldPosition, ResolvedView.TranslatedWorldToClip);
@@ -410,6 +360,24 @@ SplatWorldView CalcSplatVertexWorldPosition(float3 SplatLocalPosition, float3 Qu
 
 	return Result;
 }
+
+float4 CalcSplatVertexWorldPositionDepthPass(float3 SplatLocalPosition, float3 QuadVertexLocalPosition, FLWCMatrix LocalToWorld, SplatViewData SplatView)
+{
+	float3 TangentRight, TangentUp;
+
+	FLWCVector3 worldPosLWC = TransformLocalToWorld(SplatLocalPosition.xyz, LocalToWorld);
+	float3 SplatMeanWorldPosition = LWCToFloat(worldPosLWC);
+
+	float4 SplatWorldPosition = TransformLocalToTranslatedWorld(SplatLocalPosition.xyz, LocalToWorld);
+	float4 SplatViewPosition = mul(SplatWorldPosition, ResolvedView.TranslatedWorldToView);
+
+	// View space point sprite generation
+	SplatViewPosition.xy += QuadVertexLocalPosition.x * float2(_ShadowBlobScale * 0.5, 0) + QuadVertexLocalPosition.z * float2(0, _ShadowBlobScale * 0.5);
+	SplatWorldPosition = mul(SplatViewPosition, ResolvedView.ViewToTranslatedWorld);
+
+	return SplatWorldPosition;
+}
+
 
 #else
 float4 CalcWorldPosition(float4 Position, FLWCMatrix LocalToWorld)
@@ -461,13 +429,6 @@ FVertexFactoryIntermediates GetVertexFactoryIntermediates(FVertexFactoryInput In
 
 	SplatViewData splatView = GetSortedSplatView(inst_id);
 	Intermediates.Color.rgba = splatView.diffuse_opacity;
-	// TODO: do we need to compress/decompress those colour bits?
-	/* 
-	Intermediates.Color.r = f16tof32(splatView.color.x >> 16);
-	Intermediates.Color.g = f16tof32(splatView.color.x);
-	Intermediates.Color.b = f16tof32(splatView.color.y >> 16);
-	Intermediates.Color.a = f16tof32(splatView.color.y);	
-	*/
 	
 	// swap y<->z already been done in compute shader
 	float3 splatViewPos = splatView.pos.xyz;
@@ -651,7 +612,7 @@ float4 VertexFactoryGetWorldPosition(FPositionOnlyVertexFactoryInput Input)
 #if EVERCOAST_GAUSSIANSPLAT
 	float3 SplatLocalPosition = GetSplatLocalPosition(Input).xyz;
 	SplatViewData SplatView = GetSplatView(Input);
-	return CalcSplatVertexWorldPosition(SplatLocalPosition, Input.Position.xyz, LocalToWorld, SplatView).SplatWorldPosition;
+	return CalcSplatVertexWorldPositionDepthPass(SplatLocalPosition, Input.Position.xyz, LocalToWorld, SplatView);
 #else
     return CalcWorldPosition(Input.Position, LocalToWorld);
 #endif
@@ -666,7 +627,7 @@ float4 VertexFactoryGetWorldPosition(FPositionAndNormalOnlyVertexFactoryInput In
 #if EVERCOAST_GAUSSIANSPLAT
 	float3 SplatLocalPosition = GetSplatLocalPosition(Input).xyz;
 	SplatViewData SplatView = GetSplatView(Input);
-	return CalcSplatVertexWorldPosition(SplatLocalPosition, Input.Position.xyz, LocalToWorld, SplatView).SplatWorldPosition;
+	return CalcSplatVertexWorldPositionDepthPass(SplatLocalPosition, Input.Position.xyz, LocalToWorld, SplatView);
 #else
 	return CalcWorldPosition(Input.Position, LocalToWorld);
 #endif

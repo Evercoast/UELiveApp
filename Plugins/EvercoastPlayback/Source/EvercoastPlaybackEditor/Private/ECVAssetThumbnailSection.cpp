@@ -205,7 +205,7 @@ void FECVAssetThumbnailSection::DrawCustomFrames(FSequencerSectionPainter& InPai
 
 	//const FSlateFontInfo FontInfo = FCoreStyle::GetDefaultFontStyle("Regular", 10);
 	const FSlateFontInfo FontInfo = FCoreStyle::Get().GetFontStyle(TEXT("NormalText"));
-	const FLinearColor TextColor = FLinearColor::White;
+	const FLinearColor TextColor = FLinearColor::Gray;
 	const FLinearColor BoxColor = FLinearColor::White;
 
 	const FGeometry& Geometry = InPainter.SectionGeometry;
@@ -257,7 +257,7 @@ void FECVAssetThumbnailSection::DrawCustomFrames(FSequencerSectionPainter& InPai
 		FSlateDrawElement::MakeBox(
 			InPainter.DrawElements,
 			InPainter.LayerId++,
-			InPainter.SectionGeometry.ToPaintGeometry(BoxPosition, BoxSize),
+			InPainter.SectionGeometry.ToPaintGeometry(BoxSize, FSlateLayoutTransform(BoxPosition)),
 			FCoreStyle::Get().GetBrush("FocusRectangle"),
 			ESlateDrawEffect::None,
 			BoxColor
@@ -272,7 +272,7 @@ void FECVAssetThumbnailSection::DrawCustomFrames(FSequencerSectionPainter& InPai
 		FSlateDrawElement::MakeText(
 			InPainter.DrawElements,
 			InPainter.LayerId++,
-			InPainter.SectionGeometry.ToPaintGeometry(TextPosition, TextSize),
+			InPainter.SectionGeometry.ToPaintGeometry(TextSize, FSlateLayoutTransform(TextPosition)),
 			FrameText,
 			FontInfo,
 			ESlateDrawEffect::None,
@@ -287,7 +287,7 @@ void FECVAssetThumbnailSection::DrawCustomFrames(FSequencerSectionPainter& InPai
 		FSlateDrawElement::MakeText(
 			InPainter.DrawElements,
 			InPainter.LayerId++,
-			InPainter.SectionGeometry.ToPaintGeometry(TextPosition, TextSize),
+			InPainter.SectionGeometry.ToPaintGeometry(TextSize, FSlateLayoutTransform(TextPosition)),
 			TimestampText,
 			FontInfo,
 			ESlateDrawEffect::None,

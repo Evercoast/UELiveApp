@@ -119,7 +119,7 @@ float3 GetVoxelLocation(uint VertexId)
     uint OffsetIndex = VertexId % 8;
 	
     float3 Offset = PositionOffsets[OffsetIndex];
-    float3 Coords = float3(VoxelVF.VertexFetch_VoxelPositionBuffer[InstanceId].xzy);
+    float3 Coords = float3(MVFVoxelVF.VertexFetch_VoxelPositionBuffer[InstanceId].xzy);
     return BoundsMin.xzy + (Coords + Offset) * BoundsDim;
 }
 
@@ -134,7 +134,7 @@ half4 GetVoxelColor(FVertexFactoryInput Input)
 {
 	// InstanceId will always be zero if we're using a single color for all Voxels, otherwise it will be the buffer index
 	uint InstanceId = Input.VertexId / 48;
-    float3 yCbCr = VoxelVF.VertexFetch_VoxelColorBuffer[InstanceId].rgb;
+    float3 yCbCr = MVFVoxelVF.VertexFetch_VoxelColorBuffer[InstanceId].rgb;
     float4x4 transform = float4x4(
                     1.0000, 1.0000, 1.0000, 0.0000,
                     0.0000, -0.3441, 1.7720, 0.0000,

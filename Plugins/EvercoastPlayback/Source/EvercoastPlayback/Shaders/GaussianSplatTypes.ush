@@ -1,6 +1,7 @@
 #ifndef GAUSSIAN_SPLATT_TYPES
 #define GAUSSIAN_SPLATT_TYPES
 
+#include "GaussianSplatConstants.ush"
 
 struct DecodedSplatData
 {
@@ -8,26 +9,21 @@ struct DecodedSplatData
     float4 col_a;
     float3 scale;
     float4 quat;
-    
+    float3 sh_coeffs[MAXIMUM_SH_COEFFS];
 };
 
-// NOTE: Change of structure will need to be done in EvercoastGaussianSplatPassthroughResult.h too
+// NOTE: Change of structure will need to be done in EvercoastGaussianSplatCSResult.h too
 struct SplatViewData
 {
-    float4 pos;
-    //float4 clip_pos;
-    float2 axis1, axis2; // clip space axis but needs to be scaled up by 4???
-    //uint2 color; // 4xFP16
+    float4 pos;             // local space
+    float2 axis1, axis2;    // clip space axis
     float4 diffuse_opacity;
     float4 conic;
-    /*
-    float4 DBG_rotation;
-    float4 DBG_scale;
-    float4x4 DBG_RS;
-    float4 DBG_cov3d0, DBG_cov3d1;
-    float4 DBG_cov2d;
-    */
-    float4 spr_size_rot;
+    int2   mean_xy;         // screen space mean
+    float2 radii_clipz;     // my_radius, clip depth
+    uint   depth16;         // view space depth in 16bit float format, stored in lower 16 bits
+    uint3  padding;
+    int4   tile_idx_ranges; // covered tile index from xy(top left) to zw(bottom right)    
 };
 
 uint _NumSplats;

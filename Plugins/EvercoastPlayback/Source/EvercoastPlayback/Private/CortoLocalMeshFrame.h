@@ -43,6 +43,8 @@ class CortoLocalTextureFrame : public FGCObject
 	UTexture* m_localTexture;
 #endif
 	bool m_needsSwizzle;
+
+	EPixelFormat m_pixelFormat;
 public:
 	CortoLocalTextureFrame(const CortoWebpUnifiedDecodeResult* pResult);
 	virtual ~CortoLocalTextureFrame();
@@ -64,5 +66,10 @@ public:
 	bool NeedsSwizzle() const
 	{
 		return m_needsSwizzle;
+	}
+
+	EPixelFormat GetPixelFormat() const
+	{
+		return m_pixelFormat;
 	}
 };

@@ -13,6 +13,7 @@ enum DecoderType : uint8_t
 	DT_CortoMesh,
 	DT_WebpImage,
 	DT_EvercoastSpz,
+	DT_GaussianSplatsPLY,
 	DT_Invalid
 };
 

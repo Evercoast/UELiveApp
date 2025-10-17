@@ -5,7 +5,7 @@
 * @Author: Ye Feng
 * @Date:   2021-11-17 02:28:37
 * @Last Modified by:   feng_ye
-* @Last Modified time: 2025-03-25 13:41:11
+* @Last Modified time: 2025-07-03 09:54:21
 */
 using System;
 using System.IO;
@@ -82,8 +82,9 @@ public class EvercoastPlayback : ModuleRules
 	public EvercoastPlayback(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-		
-		PublicDependencyModuleNames.AddRange(new string[]
+        var EngineDir = Path.GetFullPath(Target.RelativeEnginePath);
+
+        PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core",
 			"CoreUObject",
@@ -128,7 +129,8 @@ public class EvercoastPlayback : ModuleRules
 			new string[] {
 				Path.Combine(EngineDirectory, "Shaders", "Shared"),
 				Path.Combine(ModuleDirectory, "Private", "ECV"),
-			});
+                Path.Combine(EngineDir, "Source/Runtime/Renderer/Private")
+            });
 
 		// Ghost Tree
 		PublicIncludePaths.Add(Path.Combine(ThirdPartyRoot, "GhostTree", "include"));
@@ -222,7 +224,12 @@ public class EvercoastPlayback : ModuleRules
 			// We built libwebp ourselves from: https://github.com/webmproject/libwebp
 			// cmake -GNinja -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -Bbuild -DCMAKE_BUILD_TYPE=Release .
 			// cmake --build build --config Release
-			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "libwebp", "lib", "Mac", "libwebp.a"));
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "libwebp", "lib", "Mac", "libwebp.dylib"));
+            PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "libwebp", "lib", "Mac", "libsharpyuv.dylib"));
+
+            // copy .dylib to binaries output folder
+			RuntimeDependencies.Add("$(BinaryOutputDir)/libwebp.dylib", Path.Combine(ThirdPartyRoot, "libwebp", "lib", "Mac", "libwebp.dylib"));
+			RuntimeDependencies.Add("$(BinaryOutputDir)/libsharpyuv.dylib", Path.Combine(ThirdPartyRoot, "libwebp", "lib", "Mac", "libsharpyuv.dylib"));
 		}
 		else if (Target.Platform == UnrealTargetPlatform.Android)
 		{
@@ -392,7 +399,7 @@ public class EvercoastPlayback : ModuleRules
 			throw new EvercoastUnsupportedPlatformException();
 		}
 
-		// Zstd
+		// Zstd only has windows for now
 		PublicIncludePaths.Add(Path.Combine(ThirdPartyRoot, "zstd", "include"));
 		if (Target.Platform == UnrealTargetPlatform.Win64)
 		{
@@ -406,6 +413,16 @@ public class EvercoastPlayback : ModuleRules
 			AdditionalPropertiesForReceipt.Add("AndroidPlugin", Path.Combine(PluginPath, "EvercoastPlayback_APL.xml"));
 		}
 
+		// Evercoast's modified libspz, compiled from: https://github.com/ye-evercoast/spz/tree/evercoast/zlib_removal
+		PublicIncludePaths.Add(Path.Combine(ThirdPartyRoot, "libspz", "include"));
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "libspz", "lib", "Win64", "libspz.lib"));
+			RuntimeDependencies.Add("$(BinaryOutputDir)/libspz.dll", Path.Combine(ThirdPartyRoot, "libspz", "lib", "Win64", "libspz.dll"));
+		}
+
+
+		// Cooked data path
 		string cookedDataPath = Path.Combine(ProjectRoot, "Content", "EvercoastVolcapSource");
 		if (!Directory.Exists(cookedDataPath))
 		{

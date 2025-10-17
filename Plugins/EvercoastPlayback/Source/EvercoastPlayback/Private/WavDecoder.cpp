@@ -106,7 +106,11 @@ bool WavDecoder::Decode(const uint8_t* data, int32_t dataSize, RuntimeAudioMetad
 	outMetadata->SampleRate = dr_wav.sampleRate;
 
 	// fill in the pcm data
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 5
+	outPCMData->SetNum(dr_wav.totalPCMFrameCount * dr_wav.channels, EAllowShrinking::Yes);
+#else
 	outPCMData->SetNum(dr_wav.totalPCMFrameCount * dr_wav.channels, true);
+#endif
 
 	uint64_t framesCount = drwav_read_pcm_frames_f32(&dr_wav, dr_wav.totalPCMFrameCount, outPCMData->GetData());
 	check(framesCount <= dr_wav.totalPCMFrameCount); // we don't want to overflow the TArray container
@@ -114,7 +118,11 @@ bool WavDecoder::Decode(const uint8_t* data, int32_t dataSize, RuntimeAudioMetad
 	// This might happen if the actual read and transcoded samples are less than declared in the header?
 	if (framesCount < dr_wav.totalPCMFrameCount)
 	{
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 5
+		outPCMData->SetNum(framesCount * dr_wav.channels, EAllowShrinking::Yes);
+#else
 		outPCMData->SetNum(framesCount * dr_wav.channels, true);
+#endif
 	}
 
 	return true;

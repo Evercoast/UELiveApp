@@ -1,0 +1,47 @@
+
+#ifndef __GAUSSIAN_SPLAT_CONSTANTS__
+#define __GAUSSIAN_SPLAT_CONSTANTS__
+
+// Those constants must be kept the same as in GaussianSplatComputeShaderConstants.h
+#define TILE_SIZE (16)
+#define BLOCK_SIZE (TILE_SIZE*TILE_SIZE)
+
+#define CALC_VIEW_DATA_THREADS (128)
+
+#define INCLUSIVE_SUM_BLOCK_SIZE (1024)
+#define INCLUSIVE_SUM_GROUP_SIZE (1024)
+
+#define DUPLICATE_KEY_THREADS (1024)
+#define FIND_RANGE_THREADS (1024)
+#define INIT_SORTING_THREADS (128)
+
+// For groupshared memory in TileRenderer.usf
+#define COLLECTOR_BATCH_SIZE (TILE_SIZE*TILE_SIZE)
+
+// 15 per colour channel for SH degree==3
+#define MAXIMUM_SH_COEFFS (15)
+
+static const float SH_C0 = 0.28209479177387814;
+static const float SH_C1 = 0.4886025119029199;
+static const float SH_C2[] =
+{
+    1.0925484305920792,
+	-1.0925484305920792,
+	0.31539156525252005,
+	-1.0925484305920792,
+	0.5462742152960396
+};
+
+static const float SH_C3[] =
+{
+    -0.5900435899266435,
+	2.890611442640554,
+	-0.4570457994644658,
+	0.3731763325901154,
+	-0.4570457994644658,
+	1.445305721320277,
+	-0.5900435899266435
+};
+
+
+#endif //__GAUSSIAN_SPLAT_CONSTANTS__
