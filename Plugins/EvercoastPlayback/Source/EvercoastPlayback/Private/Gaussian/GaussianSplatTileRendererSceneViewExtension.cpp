@@ -104,7 +104,7 @@ void FGaussianSplatTileRendererSceneViewExtension::ClearRegisteredTileRenderer()
 void FGaussianSplatTileRendererSceneViewExtension::PostRenderBasePassDeferred_RenderThread(FRDGBuilder& GraphBuilder, FSceneView& SceneView, const FRenderTargetBindingSlots& RenderTargets, TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures)
 {
 	int renderMode = CVarShaderOn.GetValueOnRenderThread();
-	if (renderMode != 1)
+	if (renderMode == 0 )
 		return;
 
 	check(IsInRenderingThread());
@@ -450,7 +450,7 @@ void FGaussianSplatTileRendererSceneViewExtension::OnOverlayRender(FPostOpaqueRe
 	FRDGBuilder& GraphBuilder = *Parameters.GraphBuilder;
 	const ERHIFeatureLevel::Type FeatureLevel = ViewInfo->FeatureLevel;
 
-	RDG_EVENT_SCOPE(GraphBuilder, "Gaussian Splats PostOpaque Colour Composite Event");
+	RDG_EVENT_SCOPE(GraphBuilder, "Gaussian Splats Overlay Colour Composite Event");
 	{
 		// First sort the registered array by view Z to slightly improve "splats over splats" occlusion
 		const FMatrix& ViewMatrix = Parameters.ViewMatrix;
