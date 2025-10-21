@@ -16,13 +16,17 @@ FString UFileDialogLibrary::OpenFileDialog()
             ? FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr)
             : nullptr;
 
+        FString ExtensionStr;
+        ExtensionStr += TEXT("Evercoast Volcap Files|*.ecv;*.ecm;*.ecz|");
+        ExtensionStr += TEXT("All files|*.*");
+
         TArray<FString> OutFiles;
         bool bOpened = DesktopPlatform->OpenFileDialog(
             ParentWindowHandle,
             TEXT("Open File"),
             FPaths::ProjectDir(),
             TEXT(""),
-            TEXT("Evercoast Splats Files (*.ecz)|*.ecz"),
+            ExtensionStr,
             EFileDialogFlags::None,
             OutFiles
         );
