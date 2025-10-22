@@ -1,3 +1,6 @@
+# 0.9.0
+- Add Gaussian Splat tile renderer support
+
 # 0.6.2
 - Add more to statistics panel
 - Fill sound buffer with zero if no available sound data. This will introduce gaps but will fix latency drift
