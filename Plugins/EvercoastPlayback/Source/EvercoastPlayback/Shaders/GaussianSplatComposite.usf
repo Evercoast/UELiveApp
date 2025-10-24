@@ -151,8 +151,6 @@ PSOut CompositeColourOverlayPS(VSOut In)
         // The sRGB->linear conversion in the splat colour map generation, for some reason, will have rgb exceeds [0, 1] range so clamp it here
         float4 OutputColor = float4(clamp(SplatColour.rgb, 0, 1) + (1 - SplatColour.a) * ExistingColour.rgb, ExistingColour.a);
         
-        OutputColor = pow(OutputColor, 2.2);
-
         // Write output
         Output.Color = OutputColor;
     }

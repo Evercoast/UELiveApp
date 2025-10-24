@@ -12,8 +12,8 @@ IMPLEMENT_GLOBAL_SHADER(FGaussianSplatEngineDepthResolvePixelShader, "/Evercoast
 IMPLEMENT_GLOBAL_SHADER(FGaussianSplatCompositeDepthPixelShader, "/EvercoastShaders/GaussianSplatComposite.usf", "CompositeDepthPS", SF_Pixel);
 
 
-FGaussianSplatTileRendererSceneViewExtension::TRegisteredSplatImage::TRegisteredSplatImage(FTextureRHIRef InColour, FTextureRHIRef InDepth, const FVector2f& InUVScale, const FVector& WorldPos, bool bInToCompositeDepth, int frameCount) :
-	Colour(InColour), Depth(InDepth), UVScale(InUVScale), WorldPosition(WorldPos), bToCompositeDepth(bInToCompositeDepth), FrameCount(frameCount)
+FGaussianSplatTileRendererSceneViewExtension::TRegisteredSplatImage::TRegisteredSplatImage(FTextureRHIRef InColour, FTextureRHIRef InDepth, const FVector2f& InUVScale, const FVector& WorldPos, bool bInToCompositeDepth, uint8 compositionStage, int frameCount) :
+	Colour(InColour), Depth(InDepth), UVScale(InUVScale), WorldPosition(WorldPos), bToCompositeDepth(bInToCompositeDepth), CompositionStage(compositionStage), FrameCount(frameCount)
 {
 }
 
@@ -22,10 +22,11 @@ FGaussianSplatTileRendererSceneViewExtension::TRegisteredSplatImage::~TRegistere
 }
 
 
-FGaussianSplatTileRendererSceneViewExtension::TRegisteredTileRenderer::TRegisteredTileRenderer(TSharedPtr<FGaussianSplatTileRenderer> InRenderer, const FVector& InWorldPos, bool bInToCompositeDepth, int InFrameCount) :
+FGaussianSplatTileRendererSceneViewExtension::TRegisteredTileRenderer::TRegisteredTileRenderer(TSharedPtr<FGaussianSplatTileRenderer> InRenderer, const FVector& InWorldPos, bool bInToCompositeDepth, uint8 compositionStage, int InFrameCount) :
 	TileRenderer(InRenderer),
 	WorldPos(InWorldPos),
 	bToCompositeDepth(bInToCompositeDepth),
+	CompositionStage(compositionStage),
 	FrameCount(InFrameCount)
 {
 
@@ -43,8 +44,7 @@ namespace
 		1,
 		TEXT("Enable FGaussianSplatTileRendererSceneViewExtension Colour Output\n")
 		TEXT(" 0: OFF;")
-		TEXT(" 1: ON(Post Opaque).")
-		TEXT(" 2: ON(Overlay)."),
+		TEXT(" 1: ON."),
 		ECVF_RenderThreadSafe);
 }
 
@@ -71,11 +71,11 @@ void FGaussianSplatTileRendererSceneViewExtension::Deinitialize()
 	}
 }
 
-void FGaussianSplatTileRendererSceneViewExtension::RegisterSplatImage(FTextureRHIRef rendererImage, FTextureRHIRef rendererDepthImage, const FVector2f& uvScale, const FVector& WorldPos, bool toCompositeDepth, int frameCount)
+void FGaussianSplatTileRendererSceneViewExtension::RegisterSplatImage(FTextureRHIRef rendererImage, FTextureRHIRef rendererDepthImage, const FVector2f& uvScale, const FVector& WorldPos, bool toCompositeDepth, uint8 compositionStage, int frameCount)
 {
 	std::lock_guard<std::recursive_mutex> guard(m_imageMutex);
 	m_registeredSplatImageList.Add(
-		MakeShared<TRegisteredSplatImage>(rendererImage, rendererDepthImage, uvScale, WorldPos, toCompositeDepth, frameCount)
+		MakeShared<TRegisteredSplatImage>(rendererImage, rendererDepthImage, uvScale, WorldPos, toCompositeDepth, compositionStage, frameCount)
 	);
 }
 
@@ -86,12 +86,12 @@ void FGaussianSplatTileRendererSceneViewExtension::ClearRegisteredSplatImages()
 	m_registeredSplatImageList.Empty();
 }
 
-void FGaussianSplatTileRendererSceneViewExtension::RegisterTileRenderer(TSharedPtr<FGaussianSplatTileRenderer> pTileRenderer, const FVector& WorldPos, bool toCompositeDepth, int frameCount)
+void FGaussianSplatTileRendererSceneViewExtension::RegisterTileRenderer(TSharedPtr<FGaussianSplatTileRenderer> pTileRenderer, const FVector& WorldPos, bool toCompositeDepth, uint8 compositionStage, int frameCount)
 {
 	std::lock_guard<std::recursive_mutex> guard(m_tileRendererMutex);
 
 	m_registeredTileRenderer.Add(
-		MakeShared<TRegisteredTileRenderer>(pTileRenderer, WorldPos, toCompositeDepth, frameCount)
+		MakeShared<TRegisteredTileRenderer>(pTileRenderer, WorldPos, toCompositeDepth, compositionStage, frameCount)
 	);
 }
 
@@ -104,8 +104,12 @@ void FGaussianSplatTileRendererSceneViewExtension::ClearRegisteredTileRenderer()
 void FGaussianSplatTileRendererSceneViewExtension::PostRenderBasePassDeferred_RenderThread(FRDGBuilder& GraphBuilder, FSceneView& SceneView, const FRenderTargetBindingSlots& RenderTargets, TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures)
 {
 	int renderMode = CVarShaderOn.GetValueOnRenderThread();
-	if (renderMode == 0 )
+	if (renderMode == 0)
+	{
+		ClearRegisteredTileRenderer();
+		ClearRegisteredSplatImages();
 		return;
+	}
 
 	check(IsInRenderingThread());
 
@@ -126,7 +130,8 @@ void FGaussianSplatTileRendererSceneViewExtension::PostRenderBasePassDeferred_Re
 			{
 
 				// register image for code just below
-				RegisterSplatImage(tileRenderer->GetOutputColourRenderTarget(), tileRenderer->GetOutputDepthRenderTarget(), tileRenderer->GetSavedOutputRenderTargetUVScale(), registeredTileRenderer->WorldPos, registeredTileRenderer->bToCompositeDepth, tileRenderer->GetOutputFrameCounter());
+				RegisterSplatImage(tileRenderer->GetOutputColourRenderTarget(), tileRenderer->GetOutputDepthRenderTarget(), tileRenderer->GetSavedOutputRenderTargetUVScale(), 
+					registeredTileRenderer->WorldPos, registeredTileRenderer->bToCompositeDepth, registeredTileRenderer->CompositionStage, tileRenderer->GetOutputFrameCounter());
 			}
 		}
 
@@ -290,8 +295,11 @@ void FGaussianSplatTileRendererSceneViewExtension::PostRenderBasePassDeferred_Re
 void FGaussianSplatTileRendererSceneViewExtension::OnPostOpaqueRender(FPostOpaqueRenderParameters& Parameters)
 {
 	int renderMode = CVarShaderOn.GetValueOnRenderThread();
-	if (renderMode != 1)
+	if (renderMode == 0)
+	{
+		ClearRegisteredSplatImages();
 		return;
+	}
 
 	check(IsInRenderingThread());
 
@@ -327,6 +335,9 @@ void FGaussianSplatTileRendererSceneViewExtension::OnPostOpaqueRender(FPostOpaqu
 		for (int i = 0; i < m_registeredSplatImageList.Num(); ++i)
 		{
 			TSharedPtr<TRegisteredSplatImage> registeredImage = m_registeredSplatImageList[i];
+			if (registeredImage->CompositionStage != 0) // skip the one that's not registered at post opaque stage
+				continue;
+
 			FRHITexture* inputImageRHITexture = registeredImage->Colour;
 			FRHITexture* inputDepthImageRHITexture = registeredImage->Depth;
 
@@ -431,8 +442,7 @@ void FGaussianSplatTileRendererSceneViewExtension::OnPostOpaqueRender(FPostOpaqu
 			AddCopyTexturePass(GraphBuilder, OutputTexture, Parameters.ColorTexture);
 		}
 
-		// Clean up this frame
-		ClearRegisteredSplatImages();
+		// Wait until overlay render to do clear registered image
 
 	}
 }
@@ -440,8 +450,11 @@ void FGaussianSplatTileRendererSceneViewExtension::OnPostOpaqueRender(FPostOpaqu
 void FGaussianSplatTileRendererSceneViewExtension::OnOverlayRender(FPostOpaqueRenderParameters& Parameters)
 {
 	int renderMode = CVarShaderOn.GetValueOnRenderThread();
-	if (renderMode != 2)
+	if (renderMode == 0)
+	{
+		ClearRegisteredSplatImages();
 		return;
+	}
 
 	m_lastPostOpaqueViewportRect = Parameters.ViewportRect;
 
@@ -472,6 +485,9 @@ void FGaussianSplatTileRendererSceneViewExtension::OnOverlayRender(FPostOpaqueRe
 		for (int i = 0; i < m_registeredSplatImageList.Num(); ++i)
 		{
 			TSharedPtr<TRegisteredSplatImage> registeredImage = m_registeredSplatImageList[i];
+			if (registeredImage->CompositionStage != 1) // skip the one that's not registered at overlay stage
+				continue;
+
 			FRHITexture* inputImageRHITexture = registeredImage->Colour;
 			FRHITexture* inputDepthImageRHITexture = registeredImage->Depth;
 
@@ -570,7 +586,7 @@ void FGaussianSplatTileRendererSceneViewExtension::OnOverlayRender(FPostOpaqueRe
 			AddCopyTexturePass(GraphBuilder, OutputTexture, Parameters.ColorTexture);
 		}
 
-		// Clean up this frame
+		// This is the final chance to clean up registered splat image for this frame
 		ClearRegisteredSplatImages();
 
 	}

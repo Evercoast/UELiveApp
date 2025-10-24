@@ -30,6 +30,13 @@ enum class EGaussianSplatRendererType : uint8 // Use enum class for strong typin
     TILE_RENDERER UMETA(DisplayName = "Tile Renderer(Accurate)"),
 };
 
+UENUM(BlueprintType)
+enum class EGaussianSplatHookStage : uint8
+{
+    POST_OPAQUE = 0 UMETA(DisplayName = "Post Opaque(Before Translucency)"),
+    OVERLAY = 1 UMETA(DisplayName = "Overlay(After Translucency)"),
+};
+
 class EvercoastGaussianSplatCSUploader;
 class EvercoastGaussianSplatCSResult;
 class UTextureRenderTarget2D;
@@ -71,6 +78,9 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetEnableTileRendererDepthWrite, Category = "Rendering")
     bool bEnableTileRendererDepthWrite = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetTileRendererHookStage, Category = "Rendering")
+    EGaussianSplatHookStage TileRendererHookStage = EGaussianSplatHookStage::OVERLAY;
 
     // ~ Begin UPrimitiveComponent Interface.
     virtual FPrimitiveSceneProxy* CreateSceneProxy() override;
@@ -121,6 +131,8 @@ public:
     UFUNCTION(BlueprintSetter)
     virtual void SetEnableTileRendererDepthWrite(bool enableDepthWrite);
 
+    UFUNCTION(BlueprintSetter)
+    virtual void SetTileRendererHookStage(EGaussianSplatHookStage stage);
 protected:
     //~ Begin UActorComponent interface
 #if WITH_EDITOR

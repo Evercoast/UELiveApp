@@ -24,7 +24,7 @@ public:
 	FEvercoastGaussianSplatSceneProxy(const UEvercoastGaussianSplatCSRendererComp* component, UMaterialInterface* material,
 		EGaussianSplatRendererType rendererType,
 		float splatDecimation, float splatExtraScale, float cov2DSqrtKernelSize, bool showDiffuseColour, bool showSH1Colour, bool showSH2Colour, bool showSH3Colour,
-		bool enableTileRendererDepthWrite);
+		bool enableTileRendererDepthWrite, EGaussianSplatHookStage tileRendererHookStage);
 	virtual ~FEvercoastGaussianSplatSceneProxy();
 
 	/** Return a type (or subtype) specific hash for sorting purposes */
@@ -78,6 +78,7 @@ public:
 
 	void SetRendererType(EGaussianSplatRendererType newType);
 	void EnableTileRendererDepthWrite(bool enableDepthWrite);
+	void SetTileRendererHookStage(EGaussianSplatHookStage stage);
 
 protected:
 	// Return regular camera view matrix
@@ -109,6 +110,7 @@ private:
 	UMaterialInterface* m_material;
 
 	EGaussianSplatRendererType m_rendererType;
+	EGaussianSplatHookStage m_tileRendererHookStage;
 
 	float m_splatDecimation;
 	float m_splatExtraScale;

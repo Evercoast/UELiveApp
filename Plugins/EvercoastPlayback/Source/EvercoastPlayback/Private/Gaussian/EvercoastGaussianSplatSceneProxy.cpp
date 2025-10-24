@@ -9,7 +9,7 @@
 FEvercoastGaussianSplatSceneProxy::FEvercoastGaussianSplatSceneProxy(const UEvercoastGaussianSplatCSRendererComp* component, UMaterialInterface* material,
 	EGaussianSplatRendererType rendererType,
 	float splatDecimation, float splatExtraScale, float cov2DSqrtKernelSize, bool showDiffuseColour, bool showSH1Colour, bool showSH2Colour, bool showSH3Colour,
-	bool enableTileRendererDepthWrite) :
+	bool enableTileRendererDepthWrite, EGaussianSplatHookStage tileRendererHookStage) :
 	FPrimitiveSceneProxy(component),
 	m_vertexFactory(GetScene().GetFeatureLevel(), "GaussianSplatOrientedQuadVertexFactory"),
 	m_material(material),
@@ -19,6 +19,7 @@ FEvercoastGaussianSplatSceneProxy::FEvercoastGaussianSplatSceneProxy(const UEver
 	// Other platform has no support of tile renderer yet
 	m_rendererType(EGaussianSplatRendererType::QUAD_RENDERER),
 #endif
+	m_tileRendererHookStage(tileRendererHookStage),
 	m_splatDecimation(splatDecimation),
 	m_splatExtraScale(splatExtraScale),
 	m_cov2DSqrtKernelSize(cov2DSqrtKernelSize),
@@ -243,7 +244,7 @@ void FEvercoastGaussianSplatSceneProxy::PerformDataReconForTileRenderer(const FM
 	UGaussianSplatCompositeSubsystem* gsComposite = GEngine->GetEngineSubsystem<UGaussianSplatCompositeSubsystem>();
 	FVector WorldPos = FVector(InObjectToWorld.M[3][0], InObjectToWorld.M[3][1], InObjectToWorld.M[3][2]);
 
-	gsComposite->CompositeSceneViewExtension->RegisterTileRenderer(m_tileRenderer, WorldPos, m_tileRendererDepthWrite, m_tileRenderer->GetOutputFrameCounter());
+	gsComposite->CompositeSceneViewExtension->RegisterTileRenderer(m_tileRenderer, WorldPos, m_tileRendererDepthWrite, (uint8)m_tileRendererHookStage, m_tileRenderer->GetOutputFrameCounter());
 
 #endif
 }
@@ -567,6 +568,11 @@ void FEvercoastGaussianSplatSceneProxy::SetRendererType(EGaussianSplatRendererTy
 void FEvercoastGaussianSplatSceneProxy::EnableTileRendererDepthWrite(bool tileRendererDepthWrite)
 {
 	m_tileRendererDepthWrite = tileRendererDepthWrite;
+}
+
+void FEvercoastGaussianSplatSceneProxy::SetTileRendererHookStage(EGaussianSplatHookStage stage)
+{
+	m_tileRendererHookStage = stage;
 }
 
 void FEvercoastGaussianSplatSceneProxy::SetEncodedGaussianSplat_RenderThread(FRHICommandListBase& RHICmdList, std::shared_ptr<const EvercoastGaussianSplatCSResult> data)

@@ -39,8 +39,7 @@ public:
 	// Called by each tile renderer to register its final image to be composited to Unreal scene
 	// Optionally to composite/inject the splat's depth, but it will introduce artefacts at the moment
 	// Can be called on both main thread and render thread
-	void RegisterSplatImage(FTextureRHIRef rendererColourImage, FTextureRHIRef rendererDepthImage, const FVector2f& uvScale, const FVector& WorldPos, bool toCompositeDepth, int frameCount);
-	void RegisterTileRenderer(TSharedPtr<FGaussianSplatTileRenderer> pTileRenderer, const FVector& WorldPos, bool toCompositeDepth, int frameCount);
+	void RegisterTileRenderer(TSharedPtr<FGaussianSplatTileRenderer> pTileRenderer, const FVector& WorldPos, bool toCompositeDepth, uint8 compositionStage, int frameCount);
 
 	// Be explicit
 	void Initialize();
@@ -55,9 +54,10 @@ private:
 		FVector2f UVScale;
 		FVector WorldPosition;
 		bool bToCompositeDepth;
+		uint8 CompositionStage;
 		int FrameCount;
 
-		TRegisteredSplatImage(FTextureRHIRef InColour, FTextureRHIRef InDepth, const FVector2f& InUVScale, const FVector& WorldPos, bool bInToCompositeDepth, int FrameCount);
+		TRegisteredSplatImage(FTextureRHIRef InColour, FTextureRHIRef InDepth, const FVector2f& InUVScale, const FVector& WorldPos, bool bInToCompositeDepth, uint8 compositionStage, int FrameCount);
 		~TRegisteredSplatImage();
 	};
 
@@ -66,11 +66,14 @@ private:
 		TSharedPtr<FGaussianSplatTileRenderer> TileRenderer;
 		FVector WorldPos;
 		bool bToCompositeDepth;
+		uint8 CompositionStage;
 		int FrameCount;
 
-		TRegisteredTileRenderer(TSharedPtr<FGaussianSplatTileRenderer> InRenderer, const FVector& InWorldPos, bool bInToCompositeDepth, int InFrameCount);
+		TRegisteredTileRenderer(TSharedPtr<FGaussianSplatTileRenderer> InRenderer, const FVector& InWorldPos, bool bInToCompositeDepth, uint8 compositionStage, int InFrameCount);
 		~TRegisteredTileRenderer();
 	};
+
+	void RegisterSplatImage(FTextureRHIRef rendererColourImage, FTextureRHIRef rendererDepthImage, const FVector2f& uvScale, const FVector& WorldPos, bool toCompositeDepth, uint8 compositionStage, int frameCount);
 
 	// To blend in colour image, we have to use FPostOpaqueRenderDelegate interface. This will be called just after all opaque objects are rendered(before translucency, post process)
 	

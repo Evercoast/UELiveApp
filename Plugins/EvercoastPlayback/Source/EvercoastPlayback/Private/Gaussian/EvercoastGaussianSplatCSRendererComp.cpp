@@ -148,6 +148,16 @@ void UEvercoastGaussianSplatCSRendererComp::SetEnableTileRendererDepthWrite(bool
     }
 }
 
+void UEvercoastGaussianSplatCSRendererComp::SetTileRendererHookStage(EGaussianSplatHookStage stage)
+{
+    TileRendererHookStage = stage;
+
+    if (SceneProxy)
+    {
+        ((FEvercoastGaussianSplatSceneProxy*)SceneProxy)->SetTileRendererHookStage(stage);
+    }
+}
+
 UMaterialInstanceDynamic* UEvercoastGaussianSplatCSRendererComp::GetNewMaterialInstanceDynamic()
 {
     UMaterialInstanceDynamic* newMaterial = CreateAndSetMaterialInstanceDynamicFromMaterial(0, GaussianSplatMaterial);
@@ -171,7 +181,7 @@ FPrimitiveSceneProxy* UEvercoastGaussianSplatCSRendererComp::CreateSceneProxy()
             Cov2DSqrtKernelSize,    // small gaussian gets blurred and boosted,
             bShowDiffuseColour,
             bShowSphericalHarmonics1Colour, bShowSphericalHarmonics2Colour, bShowSphericalHarmonics3Colour,
-            bEnableTileRendererDepthWrite
+            bEnableTileRendererDepthWrite, TileRendererHookStage
         );
 
         newSceneProxy->bPerformLateComputeShaderSplatRecon = bReconstructOnTickOnly;
