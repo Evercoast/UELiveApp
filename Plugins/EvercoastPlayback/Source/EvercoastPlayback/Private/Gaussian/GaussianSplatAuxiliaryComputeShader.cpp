@@ -10,7 +10,7 @@ IMPLEMENT_SHADER_TYPE(, FIdentifyGaussianSplatRangesCS, TEXT("/EvercoastShaders/
 // FDuplicateGaussianSplatWithKeysCS
 bool FDuplicateGaussianSplatWithKeysCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 {
-	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM6);
 }
 
 
@@ -18,7 +18,7 @@ bool FDuplicateGaussianSplatWithKeysCS::ShouldCompilePermutation(const FGlobalSh
 // FIdentifyGaussianSplatRangesCS
 bool FIdentifyGaussianSplatRangesCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 {
-	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM6);
 }
 
 #endif

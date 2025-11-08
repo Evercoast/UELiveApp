@@ -3,13 +3,16 @@
 #include "EngineModule.h"
 #include "PixelShaderUtils.h"
 #include "Gaussian/GaussianSplatTileRenderer.h"
+#include "SceneTextureParameters.h"
 
 #if PLATFORM_WINDOWS
 
-IMPLEMENT_GLOBAL_SHADER(FGaussianSplatCompositeColourPixelShader, "/EvercoastShaders/GaussianSplatComposite.usf", "CompositeColourPS", SF_Pixel);
+IMPLEMENT_GLOBAL_SHADER(FGaussianSplatCompositeColourPixelShader, "/EvercoastShaders/GaussianSplatComposite.usf", "CompositeColourPostOpaquePS", SF_Pixel);
 IMPLEMENT_GLOBAL_SHADER(FGaussianSplatCompositeColourOverlayPixelShader, "/EvercoastShaders/GaussianSplatComposite.usf", "CompositeColourOverlayPS", SF_Pixel);
+IMPLEMENT_GLOBAL_SHADER(FGaussianSplatCompositeColourPostToneMappingPixelShader, "/EvercoastShaders/GaussianSplatComposite.usf", "CompositeColourPostToneMappingPS", SF_Pixel);
 IMPLEMENT_GLOBAL_SHADER(FGaussianSplatEngineDepthResolvePixelShader, "/EvercoastShaders/GaussianSplatComposite.usf", "ResolveDepthPS", SF_Pixel);
 IMPLEMENT_GLOBAL_SHADER(FGaussianSplatCompositeDepthPixelShader, "/EvercoastShaders/GaussianSplatComposite.usf", "CompositeDepthPS", SF_Pixel);
+IMPLEMENT_GLOBAL_SHADER(FGaussianSplatEngineGBufferModifierPixelShader, "/EvercoastShaders/GaussianSplatComposite.usf", "GBufferModifierPS", SF_Pixel);
 
 
 FGaussianSplatTileRendererSceneViewExtension::TRegisteredSplatImage::TRegisteredSplatImage(FTextureRHIRef InColour, FTextureRHIRef InDepth, const FVector2f& InUVScale, const FVector& WorldPos, bool bInToCompositeDepth, uint8 compositionStage, int frameCount) :
@@ -53,6 +56,7 @@ FGaussianSplatTileRendererSceneViewExtension::FGaussianSplatTileRendererSceneVie
 {
 }
 
+
 void FGaussianSplatTileRendererSceneViewExtension::Initialize()
 {
 	m_postOpaqueRenderHandle = GetRendererModule().RegisterPostOpaqueRenderDelegate(FPostOpaqueRenderDelegate::CreateRaw(this, &FGaussianSplatTileRendererSceneViewExtension::OnPostOpaqueRender));
@@ -70,6 +74,30 @@ void FGaussianSplatTileRendererSceneViewExtension::Deinitialize()
 		GetRendererModule().RemoveOverlayRenderDelegate(m_overlayRenderHandle);
 	}
 }
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 5
+void FGaussianSplatTileRendererSceneViewExtension::SubscribeToPostProcessingPass(EPostProcessingPass PassId, const FSceneView& InView, FAfterPassCallbackDelegateArray& InOutPassCallbacks, bool bIsPassEnabled)
+#else
+void FGaussianSplatTileRendererSceneViewExtension::SubscribeToPostProcessingPass(EPostProcessingPass PassId, FAfterPassCallbackDelegateArray& InOutPassCallbacks, bool bIsPassEnabled)
+#endif
+{
+	if (PassId == EPostProcessingPass::Tonemap)
+	{
+		bool needRegister = false;
+		for (int i = 0; i < m_registeredSplatImageList.Num(); ++i)
+		{
+			TSharedPtr<TRegisteredSplatImage> registeredImage = m_registeredSplatImageList[i];
+			if (registeredImage->CompositionStage == 2) // if there's anyone registered for tonemapping
+			{
+				needRegister = true;
+				break;
+			}
+		}
+		
+		if (needRegister)
+			InOutPassCallbacks.Add(FAfterPassCallbackDelegate::CreateRaw(this, &FGaussianSplatTileRendererSceneViewExtension::OnPostProcessingTonemap));
+	}
+}
+
 
 void FGaussianSplatTileRendererSceneViewExtension::RegisterSplatImage(FTextureRHIRef rendererImage, FTextureRHIRef rendererDepthImage, const FVector2f& uvScale, const FVector& WorldPos, bool toCompositeDepth, uint8 compositionStage, int frameCount)
 {
@@ -106,17 +134,26 @@ void FGaussianSplatTileRendererSceneViewExtension::PostRenderBasePassDeferred_Re
 	int renderMode = CVarShaderOn.GetValueOnRenderThread();
 	if (renderMode == 0)
 	{
-		ClearRegisteredTileRenderer();
-		ClearRegisteredSplatImages();
 		return;
 	}
 
 	check(IsInRenderingThread());
 
+	// Only works in VMI_Lit and VMI_Unlit mode
+	EViewModeIndex ViewMode = SceneView.Family->ViewMode;
+	if (ViewMode != VMI_Lit && ViewMode != VMI_Unlit && ViewMode != VMI_VisualizeBuffer)
+	{
+		ClearRegisteredSplatImages();
+		ClearRegisteredTileRenderer();
+		return;
+	}
+
 	// In 5.4 5.5
 	// Use this RHICmdList to call UGaussianSplatTileRenderer::RunPipeline_RenderThread() get the image result without delay
 	{
 		std::lock_guard<std::recursive_mutex> guard(m_tileRendererMutex);
+
+		ClearRegisteredSplatImages();
 
 		FRHICommandListImmediate& RHICmdList = GraphBuilder.RHICmdList;
 		for (int i = 0; i < m_registeredTileRenderer.Num(); ++i)
@@ -130,7 +167,7 @@ void FGaussianSplatTileRendererSceneViewExtension::PostRenderBasePassDeferred_Re
 			{
 
 				// register image for code just below
-				RegisterSplatImage(tileRenderer->GetOutputColourRenderTarget(), tileRenderer->GetOutputDepthRenderTarget(), tileRenderer->GetSavedOutputRenderTargetUVScale(), 
+				RegisterSplatImage(tileRenderer->GetOutputColourRenderTarget(), tileRenderer->GetOutputDepthRenderTarget(), tileRenderer->GetSavedOutputRenderTargetUVScale(),
 					registeredTileRenderer->WorldPos, registeredTileRenderer->bToCompositeDepth, registeredTileRenderer->CompositionStage, tileRenderer->GetOutputFrameCounter());
 			}
 		}
@@ -138,7 +175,7 @@ void FGaussianSplatTileRendererSceneViewExtension::PostRenderBasePassDeferred_Re
 		ClearRegisteredTileRenderer();
 	}
 
-	
+
 
 	// Inject depth here
 
@@ -152,7 +189,12 @@ void FGaussianSplatTileRendererSceneViewExtension::PostRenderBasePassDeferred_Re
 	FIntRect ViewportUnscaled = SceneView.UnscaledViewRect;
 	FIntRect ViewportRaw = SceneView.UnconstrainedViewRect;
 
+	check(SceneView.bIsViewInfo);
+	const FViewInfo* ViewInfo = (const FViewInfo*)&SceneView;
+
 	FScreenPassTexture SceneDepth((*SceneTextures)->SceneDepthTexture, FIntRect(0, 0, sceneDepthSize.X, sceneDepthSize.Y));
+
+//	FScreenPassTexture GBufferC((*SceneTextures)->GBufferCTexture, FIntRect(0, 0, sceneDepthSize.X, sceneDepthSize.Y));
 
 	// Desc for regular R32F to store SceneDepth in pass 1
 	FRDGTextureDesc ResolvedDesc = FRDGTextureDesc::Create2D(
@@ -179,7 +221,7 @@ void FGaussianSplatTileRendererSceneViewExtension::PostRenderBasePassDeferred_Re
 	// This dummy colour target should be reusable too
 	FRDGTextureRef DummyTextureRGBA8 = GraphBuilder.CreateTexture(DummyColourDesc, TEXT("DummyColourWritable"));
 
-	
+
 
 	RDG_EVENT_SCOPE(GraphBuilder, "Gaussian Splats PostRenderBase Depth Composite Event");
 	{
@@ -235,7 +277,7 @@ void FGaussianSplatTileRendererSceneViewExtension::PostRenderBasePassDeferred_Re
 				Params->ViewportSizeInvSize = FVector4f(ViewportUnscaled.Width(), ViewportUnscaled.Height(), 1.0f / ViewportUnscaled.Width(), 1.0f / ViewportUnscaled.Height());
 				Params->SplatDepthSizeInvSize = FVector4f(inputDepthImageRHITexture->GetSizeX(), inputDepthImageRHITexture->GetSizeY(), 1.0f / inputDepthImageRHITexture->GetSizeX(), 1.0f / inputDepthImageRHITexture->GetSizeY());
 
-				FIntRect realViewportRect = m_lastPostOpaqueViewportRect;
+				FIntRect realViewportRect = ViewInfo->ViewRect;
 				if (realViewportRect.Width() == 0 || realViewportRect.Height() == 0)
 				{
 					// just use the full screen but incorrect for one frame
@@ -243,17 +285,6 @@ void FGaussianSplatTileRendererSceneViewExtension::PostRenderBasePassDeferred_Re
 				}
 				// ASSUME COLOR / DEPTH ARE THE SAME.. IT MIGHT CHANGE?
 				Params->SceneColorDepthUVScale = FVector2f(float(realViewportRect.Width()) / float(sceneDepthSize.X), float(realViewportRect.Height()) / float(sceneDepthSize.Y));
-
-				/*
-				UE_LOG(LogTemp, Log, TEXT("ViewportUnscaled: (%dx%d) PostOpaqueViewport: (%dx%d) SceneDepth: (%dx%d) SplatDepthRT: (%dx%d) SceneDepth Actual Render Area/Viewport Area Ratio: (%.2f, %.2f)"), 
-					ViewportUnscaled.Width(), ViewportUnscaled.Height(), 
-					m_lastPostOpaqueViewportRect.Width(), m_lastPostOpaqueViewportRect.Height(),
-					sceneDepthSize.X, sceneDepthSize.Y,
-					inputDepthImageRHITexture->GetSizeX(), inputDepthImageRHITexture->GetSizeY(),
-					Params->SceneDepthUVScale.X, Params->SceneDepthUVScale.Y
-				);
-				*/
-
 				Params->SplatUVScale = registeredImage->UVScale;
 				Params->SplatDepthTexture = inputDepthImageRHITexture; // input 1
 				Params->SceneDepthTextureR32F = ResolvedDepthR32F; // input 2
@@ -282,12 +313,12 @@ void FGaussianSplatTileRendererSceneViewExtension::PostRenderBasePassDeferred_Re
 					TStaticDepthStencilState <true, CF_Always>::GetRHI()
 				);
 			}
-		}
 
-		// Wait until colour composition to do clear registered image
+			
+		}
 	}
 
-	
+
 }
 
 
@@ -297,19 +328,19 @@ void FGaussianSplatTileRendererSceneViewExtension::OnPostOpaqueRender(FPostOpaqu
 	int renderMode = CVarShaderOn.GetValueOnRenderThread();
 	if (renderMode == 0)
 	{
-		ClearRegisteredSplatImages();
 		return;
 	}
 
 	check(IsInRenderingThread());
 
-	m_lastPostOpaqueViewportRect = Parameters.ViewportRect;
-
 	const FViewInfo* ViewInfo = Parameters.View;
 
 	FRDGBuilder& GraphBuilder = *Parameters.GraphBuilder;
 
-	
+	// A: world normal
+	// B: specular, roughness, metallic
+	// C: base color
+	FRDGTexture* GBufferTarget = (*Parameters.SceneTexturesUniformParams)->GBufferATexture;
 
 	const ERHIFeatureLevel::Type FeatureLevel = ViewInfo->FeatureLevel;
 
@@ -331,119 +362,157 @@ void FGaussianSplatTileRendererSceneViewExtension::OnPostOpaqueRender(FPostOpaqu
 		FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(FeatureLevel);
 
 		std::lock_guard<std::recursive_mutex> guard(m_imageMutex);
+
+		// Get the input sizes (do note that viewport visible area might not be the full extent of the SceneColor texture
+		// https://docs.unrealengine.com/5.1/en-US/screen-percentage-with-temporal-upscale-in-unreal-engine/
+		FIntRect ViewportRect = Parameters.ViewportRect;
+		FIntPoint ColorTextureSize = Parameters.ColorTexture->Desc.Extent;
+		// Desc for dummy depth stencil in pass 1, copy most from the "official" depth stenil desc
+		FRDGTextureDesc DummyDepthBufferDesc = Parameters.DepthTexture->Desc;
+		DummyDepthBufferDesc.Format = EPixelFormat::PF_DepthStencil;
+		DummyDepthBufferDesc.ClearValue = FClearValueBinding(0);
+		DummyDepthBufferDesc.Flags = TexCreate_DepthStencilTargetable | TexCreate_ShaderResource;
+		DummyDepthBufferDesc.ClearValue = FClearValueBinding(0, 0);
+
+		FRDGTextureRef DummyDepthRDGTexture = GraphBuilder.CreateTexture(DummyDepthBufferDesc, TEXT("CopyColour DummyDepth"));
+		// Both pass 1-2, 3-4 need a dummy depth stencil here
+		FDepthStencilBinding DepthStencilBinding(
+			DummyDepthRDGTexture,
+			ERenderTargetLoadAction::ENoAction,
+			ERenderTargetLoadAction::ENoAction,
+			FExclusiveDepthStencil::DepthWrite_StencilWrite
+		);
+
 		// For all registered images
 		for (int i = 0; i < m_registeredSplatImageList.Num(); ++i)
 		{
 			TSharedPtr<TRegisteredSplatImage> registeredImage = m_registeredSplatImageList[i];
-			if (registeredImage->CompositionStage != 0) // skip the one that's not registered at post opaque stage
-				continue;
+			bool bCompositeColourImage = true;
+			if (registeredImage->CompositionStage != 0) // skip the colour composition passes that's not registered at post opaque stage
+				bCompositeColourImage = false;
 
-			FRHITexture* inputImageRHITexture = registeredImage->Colour;
-			FRHITexture* inputDepthImageRHITexture = registeredImage->Depth;
-
-			// Setup all the descriptors to create a target texture
-			FRDGTextureDesc OutputDesc;
+			if (bCompositeColourImage)
 			{
-				OutputDesc = Parameters.ColorTexture->Desc;
-				OutputDesc.Reset();
-				// Make rendertargetable
-				OutputDesc.Flags |= TexCreate_RenderTargetable;
+				FRHITexture* inputImageRHITexture = registeredImage->Colour;
+				FRHITexture* inputDepthImageRHITexture = registeredImage->Depth;
 
-				// DEBUG READ
-				FLinearColor ClearColor(1., 0., 0., 1.);
-				OutputDesc.ClearValue = FClearValueBinding(ClearColor);
+				// Setup all the descriptors to create a target texture
+				FRDGTextureDesc OutputDesc;
+				{
+					OutputDesc = Parameters.ColorTexture->Desc;
+					OutputDesc.Reset();
+					// Make rendertargetable
+					OutputDesc.Flags |= TexCreate_RenderTargetable;
+
+					// DEBUG READ
+					FLinearColor ClearColor(1., 0., 0., 1.);
+					OutputDesc.ClearValue = FClearValueBinding(ClearColor);
+				}
+
+
+
+				// Set the shader parameters
+				FGaussianSplatCompositeColourPixelShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FGaussianSplatCompositeColourPixelShader::FParameters>();
+
+				// Have to set this ViewUnifomBuffer?
+				FCommonShaderParameters CommonParameters;
+				CommonParameters.ViewUniformBuffer = ViewInfo->ViewUniformBuffer;
+				PassParameters->CommonParameters = CommonParameters;
+
+				/////////// INPUT ////////////////
+				// Input is the SceneColor from PostProcess Material Inputs
+				PassParameters->OriginalSceneColor = Parameters.ColorTexture;
+				PassParameters->OriginalSceneDepth = Parameters.DepthTexture;
+
+				// This binding is import to access scene textures like depth and using utility function LookupDeviceZ() etc
+				PassParameters->SceneTextures = Parameters.SceneTexturesUniformParams;
+
+				PassParameters->SplatInputColor = inputImageRHITexture;
+				PassParameters->SplatInputDepth = inputDepthImageRHITexture;
+
+
+				PassParameters->ViewportSizeInvSize = FVector4f(ViewportRect.Width(), ViewportRect.Height(), 1.0f / ViewportRect.Width(), 1.0f / ViewportRect.Height());
+
+				//			UE_LOG(LogTemp, Log, TEXT("Viewport: (%dx%d) Splat RT: (%dx%d)"), ViewportRect.Max.X, ViewportRect.Max.Y, inputImageRHITexture->GetSizeX(), inputImageRHITexture->GetSizeY());
+
+							// Conversion from the full texture to the actual used size
+							// Refer to Screenpass.h to see how UE handles scaling of the different viewport sizes
+
+							// ASSUME DEPTH UV SCALE IS THE SAME...
+				PassParameters->SceneColorDepthUVScale = FVector2f(float(ViewportRect.Width()) / float(ColorTextureSize.X), float(ViewportRect.Height()) / float(ColorTextureSize.Y));
+				PassParameters->SplatUVScale = registeredImage->UVScale;
+				PassParameters->LinearClamp = TStaticSamplerState<SF_Trilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
+
+				/////////// OUTPUT /////////////
+				// Create colour target texture
+				FRDGTextureRef OutputTexture = GraphBuilder.CreateTexture(OutputDesc, TEXT("Gaussian Splats Colour Composition Output Texture"));
+				PassParameters->RenderTargets[0] = FRenderTargetBinding(OutputTexture, ERenderTargetLoadAction::ENoAction);
+				PassParameters->RenderTargets.DepthStencil = DepthStencilBinding;
+
+				TShaderMapRef<FGaussianSplatCompositeColourPixelShader> PixelShader(GlobalShaderMap);
+				// Pass 1: Compute shader pass to blend splat colour into scene colour, Ztest ON
+				FPixelShaderUtils::AddFullscreenPass(
+					GraphBuilder,
+					GlobalShaderMap,
+					RDG_EVENT_NAME("Gaussian Splats Colour Composition Pass"),
+					PixelShader,
+					PassParameters,
+					Parameters.ViewportRect,
+					TStaticBlendState<>::GetRHI(),
+					TStaticRasterizerState<>::GetRHI(),
+					// ZWrite=false, ZTest=Always
+					TStaticDepthStencilState <false, CF_Always>::GetRHI()
+				);
+
+				// Pass 2: Copy the output texture back to "official" SceneColor
+				AddCopyTexturePass(GraphBuilder, OutputTexture, Parameters.ColorTexture);
 			}
 
-			
+			// NOTE: Even user don't choose to composite image at this stage, we'll need to modify G-buffer here to remove shininess
+			{
+				FRHITexture* inputImageRHITexture = registeredImage->Colour;
+				FRHITexture* inputDepthImageRHITexture = registeredImage->Depth;
 
-			// Set the shader parameters
-			FGaussianSplatCompositeColourPixelShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FGaussianSplatCompositeColourPixelShader::FParameters>();
+				// Pass 3: copy out G buffer contains specular
+				FRDGTextureDesc GBufferDesc = GBufferTarget->Desc;
+				GBufferDesc.Flags |= TexCreate_RenderTargetable;
+				FRDGTextureRef GBufferTargetCopy = GraphBuilder.CreateTexture(GBufferDesc, TEXT("GBuffer Copy Texture"));
 
-			// Have to set this ViewUnifomBuffer?
-			FCommonShaderParameters CommonParameters;
-			CommonParameters.ViewUniformBuffer = ViewInfo->ViewUniformBuffer;
-			PassParameters->CommonParameters = CommonParameters;
+				AddCopyTexturePass(GraphBuilder, GBufferTarget, GBufferTargetCopy);
 
-			/////////// INPUT ////////////////
-			// Input is the SceneColor from PostProcess Material Inputs
-			PassParameters->OriginalSceneColor = Parameters.ColorTexture;
-			PassParameters->OriginalSceneDepth = Parameters.DepthTexture;
+				// Pass 4: Modify G buffers to remove the contribution that's not from splats	
+				{
+					FGaussianSplatEngineGBufferModifierPixelShader::FParameters* P = GraphBuilder.AllocParameters<FGaussianSplatEngineGBufferModifierPixelShader::FParameters>();
+					P->OriginalGBuffer = GBufferTargetCopy;
+					P->SplatInputColor = inputImageRHITexture;
+					P->SplatInputDepth = inputDepthImageRHITexture;
+					P->OriginalSceneDepth = Parameters.DepthTexture;
+					P->ViewportSizeInvSize = FVector4f(ViewportRect.Width(), ViewportRect.Height(), 1.0f / ViewportRect.Width(), 1.0f / ViewportRect.Height());
+					P->SceneColorDepthUVScale = FVector2f(float(ViewportRect.Width()) / float(ColorTextureSize.X), float(ViewportRect.Height()) / float(ColorTextureSize.Y));
+					P->SplatUVScale = registeredImage->UVScale;
 
-			// This binding is import to access scene textures like depth and using utility function LookupDeviceZ() etc
-			PassParameters->SceneTextures = Parameters.SceneTexturesUniformParams;
+					P->LinearClamp = TStaticSamplerState<SF_Trilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
+					// Write target is G-Buffer
+					P->RenderTargets[0] = FRenderTargetBinding(GBufferTarget, ERenderTargetLoadAction::ELoad);
+					P->RenderTargets.DepthStencil = DepthStencilBinding;
 
-			PassParameters->SplatInputColor = inputImageRHITexture;
-			PassParameters->SplatInputColorDepthSizeInvSize = FVector4f(inputImageRHITexture->GetSizeX(), inputImageRHITexture->GetSizeY(),
-				1.0f / inputImageRHITexture->GetSizeX(), 1.0f / inputImageRHITexture->GetSizeY());
-
-			PassParameters->SplatInputDepth = inputDepthImageRHITexture;
-
-			// Get the input sizes (do note that viewport visible area might not be the full extent of the SceneColor texture
-			// https://docs.unrealengine.com/5.1/en-US/screen-percentage-with-temporal-upscale-in-unreal-engine/
-			FIntRect ViewportRect = Parameters.ViewportRect;
-			FIntPoint ColorTextureSize = Parameters.ColorTexture->Desc.Extent;
-
-			PassParameters->ViewportSizeInvSize = FVector4f(ViewportRect.Width(), ViewportRect.Height(), 1.0f / ViewportRect.Width(), 1.0f / ViewportRect.Height());
-
-//			UE_LOG(LogTemp, Log, TEXT("Viewport: (%dx%d) Splat RT: (%dx%d)"), ViewportRect.Max.X, ViewportRect.Max.Y, inputImageRHITexture->GetSizeX(), inputImageRHITexture->GetSizeY());
-
-			// Conversion from the full texture to the actual used size
-			// Refer to Screenpass.h to see how UE handles scaling of the different viewport sizes
-
-			// ASSUME DEPTH UV SCALE IS THE SAME...
-			PassParameters->SceneColorDepthUVScale = FVector2f(float(ViewportRect.Width()) / float(ColorTextureSize.X), float(ViewportRect.Height()) / float(ColorTextureSize.Y));
-
-			PassParameters->SplatUVScale = registeredImage->UVScale;
-
-			// Official depth map dimension
-			FIntPoint sceneDepthSize = Parameters.DepthTexture->Desc.Extent;
-			PassParameters->SceneDepthSizeInvSize = FVector4f(sceneDepthSize.X, sceneDepthSize.Y, 1.0f / sceneDepthSize.X, 1.0f / sceneDepthSize.Y);
-
-			PassParameters->LinearClamp = TStaticSamplerState<SF_Trilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
-
-			/////////// OUTPUT /////////////
-			// Create colour target texture
-			FRDGTextureRef OutputTexture = GraphBuilder.CreateTexture(OutputDesc, TEXT("Gaussian Splats Colour Composition Output Texture"));
-			PassParameters->RenderTargets[0] = FRenderTargetBinding(OutputTexture, ERenderTargetLoadAction::ENoAction);
-
-			// Desc for dummy depth stencil in pass 1, copy most from the "official" depth stenil desc
-			FRDGTextureDesc DummyDepthBufferDesc = Parameters.DepthTexture->Desc;
-			DummyDepthBufferDesc.Format = EPixelFormat::PF_DepthStencil;
-			DummyDepthBufferDesc.ClearValue = FClearValueBinding(0);
-			DummyDepthBufferDesc.Flags = TexCreate_DepthStencilTargetable | TexCreate_ShaderResource;
-			DummyDepthBufferDesc.ClearValue = FClearValueBinding(0, 0);
-			FRDGTextureRef DummyDepthRDGTexture = GraphBuilder.CreateTexture(DummyDepthBufferDesc, TEXT("CopyColour DummyDepth"));
-
-			// Need a dummy depth stencil here
-			FDepthStencilBinding DepthStencilBinding(
-				DummyDepthRDGTexture,
-				ERenderTargetLoadAction::ENoAction,
-				ERenderTargetLoadAction::ENoAction,
-				FExclusiveDepthStencil::DepthWrite_StencilWrite
-			);
-			PassParameters->RenderTargets.DepthStencil = DepthStencilBinding;
-
-			TShaderMapRef<FGaussianSplatCompositeColourPixelShader> PixelShader(GlobalShaderMap);
-			// Pass 1: Compute shader pass to blend splat colour into scene colour, Ztest ON
-			FPixelShaderUtils::AddFullscreenPass(
-				GraphBuilder,
-				GlobalShaderMap,
-				RDG_EVENT_NAME("Gaussian Splats Colour Composition Pass"),
-				PixelShader,
-				PassParameters,
-				Parameters.ViewportRect,
-				TStaticBlendState<>::GetRHI(),
-				TStaticRasterizerState<>::GetRHI(),
-				// ZWrite=false, ZTest=Always
-				TStaticDepthStencilState <false, CF_Always>::GetRHI()
-			);
-
-			// Pass 2: Copy the output texture back to "official" SceneColor
-			AddCopyTexturePass(GraphBuilder, OutputTexture, Parameters.ColorTexture);
+					// Fullscreen draw (pixel shader outputs float to RTV)
+					TShaderMapRef<FGaussianSplatEngineGBufferModifierPixelShader> PS(GlobalShaderMap);
+					FPixelShaderUtils::AddFullscreenPass(
+						GraphBuilder,
+						GlobalShaderMap,
+						RDG_EVENT_NAME("Modify G-Buffer Pass"),
+						PS,
+						P,
+						Parameters.ViewportRect, //FIntRect(0, 0, ColorTextureSize.X, ColorTextureSize.Y),
+						TStaticBlendState<>::GetRHI(),
+						TStaticRasterizerState<>::GetRHI(),
+						// Zwrite = false, Ztest = always
+						TStaticDepthStencilState<false, CF_Always>::GetRHI()
+					);
+				}
+			}
 		}
-
-		// Wait until overlay render to do clear registered image
-
 	}
 }
 
@@ -452,11 +521,8 @@ void FGaussianSplatTileRendererSceneViewExtension::OnOverlayRender(FPostOpaqueRe
 	int renderMode = CVarShaderOn.GetValueOnRenderThread();
 	if (renderMode == 0)
 	{
-		ClearRegisteredSplatImages();
 		return;
 	}
-
-	m_lastPostOpaqueViewportRect = Parameters.ViewportRect;
 
 	const FViewInfo* ViewInfo = Parameters.View;
 
@@ -517,9 +583,6 @@ void FGaussianSplatTileRendererSceneViewExtension::OnOverlayRender(FPostOpaqueRe
 
 
 			PassParameters->SplatInputColor = inputImageRHITexture;
-			PassParameters->SplatInputColorDepthSizeInvSize = FVector4f(inputImageRHITexture->GetSizeX(), inputImageRHITexture->GetSizeY(),
-				1.0f / inputImageRHITexture->GetSizeX(), 1.0f / inputImageRHITexture->GetSizeY());
-
 			PassParameters->SplatInputDepth = inputDepthImageRHITexture;
 
 			// Get the input sizes (do note that viewport visible area might not be the full extent of the SceneColor texture
@@ -529,20 +592,14 @@ void FGaussianSplatTileRendererSceneViewExtension::OnOverlayRender(FPostOpaqueRe
 
 			PassParameters->ViewportSizeInvSize = FVector4f(ViewportRect.Width(), ViewportRect.Height(), 1.0f / ViewportRect.Width(), 1.0f / ViewportRect.Height());
 
-			//			UE_LOG(LogTemp, Log, TEXT("Viewport: (%dx%d) Splat RT: (%dx%d)"), ViewportRect.Max.X, ViewportRect.Max.Y, inputImageRHITexture->GetSizeX(), inputImageRHITexture->GetSizeY());
+			//UE_LOG(LogTemp, Log, TEXT("Viewport: (%dx%d) Splat RT: (%dx%d)"), ViewportRect.Max.X, ViewportRect.Max.Y, inputImageRHITexture->GetSizeX(), inputImageRHITexture->GetSizeY());
 
-						// Conversion from the full texture to the actual used size
-						// Refer to Screenpass.h to see how UE handles scaling of the different viewport sizes
+			// Conversion from the full texture to the actual used size
+			// Refer to Screenpass.h to see how UE handles scaling of the different viewport sizes
 
-						// ASSUME DEPTH UV SCALE IS THE SAME...
+			// ASSUME DEPTH UV SCALE IS THE SAME...
 			PassParameters->SceneColorDepthUVScale = FVector2f(float(ViewportRect.Width()) / float(ColorTextureSize.X), float(ViewportRect.Height()) / float(ColorTextureSize.Y));
-
 			PassParameters->SplatUVScale = registeredImage->UVScale;
-
-			// Official depth map dimension
-			FIntPoint sceneDepthSize = Parameters.DepthTexture->Desc.Extent;
-			PassParameters->SceneDepthSizeInvSize = FVector4f(sceneDepthSize.X, sceneDepthSize.Y, 1.0f / sceneDepthSize.X, 1.0f / sceneDepthSize.Y);
-
 			PassParameters->LinearClamp = TStaticSamplerState<SF_Trilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
 
 			/////////// OUTPUT /////////////
@@ -586,9 +643,146 @@ void FGaussianSplatTileRendererSceneViewExtension::OnOverlayRender(FPostOpaqueRe
 			AddCopyTexturePass(GraphBuilder, OutputTexture, Parameters.ColorTexture);
 		}
 
-		// This is the final chance to clean up registered splat image for this frame
-		ClearRegisteredSplatImages();
+		
+	}
+
+}
+
+FScreenPassTexture FGaussianSplatTileRendererSceneViewExtension::OnPostProcessingTonemap(FRDGBuilder& GraphBuilder, const FSceneView& SceneView, const FPostProcessMaterialInputs& Inputs)
+{
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4
+	// Works in 5.5, while 5.4 fails silently in non-FXAA anti aliasing
+	FScreenPassTexture SceneColor = Inputs.ReturnUntouchedSceneColorForPostProcessing(GraphBuilder);
+#else
+	const FScreenPassTexture& SceneColor = Inputs.Textures[(uint32)EPostProcessMaterialInput::SceneColor];
+#endif
+
+	if (!SceneColor.IsValid())
+	{
+		return SceneColor;
+	}
+
+	int renderMode = CVarShaderOn.GetValueOnRenderThread();
+	if (renderMode == 0)
+	{
+		return SceneColor;
+	}
+
+	// Only copy merge with SceneColor in VMI_Lit and VMI_Unlit mode
+	EViewModeIndex ViewMode = SceneView.Family->ViewMode;
+	if (ViewMode != VMI_Lit && ViewMode != VMI_Unlit && ViewMode != VMI_VisualizeBuffer)
+	{
+		return SceneColor;
+	}
+
+	const FSceneViewFamily& ViewFamily = *SceneView.Family;
+	const ERHIFeatureLevel::Type FeatureLevel = SceneView.GetFeatureLevel();
+
+
+	// Here starts the RDG stuff
+	RDG_EVENT_SCOPE(GraphBuilder, "Gaussian Splats Tile Renderer Post Tone Mapping Composite");
+	{
+		// Accesspoint to our Shaders
+		FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(ViewFamily.GetFeatureLevel());
+
+
+		// For all registered images
+		for (int i = 0; i < m_registeredSplatImageList.Num(); ++i)
+		{
+			TSharedPtr<TRegisteredSplatImage> registeredImage = m_registeredSplatImageList[i];
+			if (registeredImage->CompositionStage != 2) // skip the one that's not registered at tonemap stage
+				continue;
+
+			FRHITexture* inputImageRHITexture = registeredImage->Colour;
+			FRHITexture* inputDepthImageRHITexture = registeredImage->Depth;
+
+			// Use exactly the same desc as the SceneColor texture, as later we'll do a texture copy
+			FRDGTextureDesc OutputDesc = SceneColor.Texture->Desc;
+			// UE5.4 complains about flag has no rendertargetable
+			OutputDesc.Flags |= TexCreate_RenderTargetable | TexCreate_UAV;
+
+			// Set the shader parameters
+			FGaussianSplatCompositeColourPostToneMappingPixelShader::FParameters* PassParameters = GraphBuilder.AllocParameters<FGaussianSplatCompositeColourPostToneMappingPixelShader::FParameters>();
+
+
+			/////////// INPUT ////////////////
+			// Input is the SceneColor from PostProcess Material Inputs
+			FCommonShaderParameters CommonParameters;
+			CommonParameters.ViewUniformBuffer = SceneView.ViewUniformBuffer;
+			PassParameters->CommonParameters = CommonParameters;
+			PassParameters->SceneTextures = Inputs.SceneTextures.SceneTextures;
+
+			PassParameters->OriginalSceneColor = SceneColor.Texture;
+			// Cannot reliably get depth texture, should be stored in CommonParameters so use LookupDeviceZ() to sample depth
+
+			PassParameters->SplatInputColor = inputImageRHITexture;
+			PassParameters->SplatInputDepth = inputDepthImageRHITexture;
+
+			// Get the input sizes (do note that viewport visible area might not be the full extent of the SceneColor texture
+			// https://docs.unrealengine.com/5.1/en-US/screen-percentage-with-temporal-upscale-in-unreal-engine/
+			FIntRect ViewportRect = SceneColor.ViewRect;
+			FIntPoint ColorTextureSize = SceneColor.Texture->Desc.Extent;
+			PassParameters->ViewportSizeInvSize = FVector4f(ViewportRect.Width(), ViewportRect.Height(), 1.0f / ViewportRect.Width(), 1.0f / ViewportRect.Height());
+
+			// ASSUME DEPTH UV SCALE IS THE SAME...
+			PassParameters->SceneColorDepthUVScale = FVector2f(float(ViewportRect.Width()) / float(ColorTextureSize.X), float(ViewportRect.Height()) / float(ColorTextureSize.Y));
+			PassParameters->SplatUVScale = registeredImage->UVScale;
+			PassParameters->LinearClamp = TStaticSamplerState<SF_Trilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
+
+			/////////// OUTPUT /////////////
+			// Create colour target texture
+			FRDGTextureRef OutputTexture = GraphBuilder.CreateTexture(OutputDesc, TEXT("Gaussian Splats Colour Composition Output Texture"));
+			PassParameters->RenderTargets[0] = FRenderTargetBinding(OutputTexture, ERenderTargetLoadAction::ENoAction);
+
+			// Desc for dummy depth stencil in pass 1, use the same size as the output color texture
+			FRDGTextureDesc DummyDepthBufferDesc = FRDGTextureDesc::Create2D(
+				FIntPoint(OutputDesc.GetSize().X, OutputDesc.GetSize().Y),
+				EPixelFormat::PF_DepthStencil,
+				FClearValueBinding(0),
+				TexCreate_DepthStencilTargetable | TexCreate_ShaderResource,
+				1,
+				1,
+				0
+				);
+
+			FRDGTextureRef DummyDepthRDGTexture = GraphBuilder.CreateTexture(DummyDepthBufferDesc, TEXT("CopyColour DummyDepth"));
+
+			// Need a dummy depth stencil here
+			FDepthStencilBinding DepthStencilBinding(
+				DummyDepthRDGTexture,
+				ERenderTargetLoadAction::ENoAction,
+				ERenderTargetLoadAction::ENoAction,
+				FExclusiveDepthStencil::DepthWrite_StencilWrite
+			);
+			PassParameters->RenderTargets.DepthStencil = DepthStencilBinding;
+
+			TShaderMapRef<FGaussianSplatCompositeColourPostToneMappingPixelShader> PixelShader(GlobalShaderMap);
+			// Pass 1: Compute shader pass to blend splat colour into scene colour, Ztest ON
+			FPixelShaderUtils::AddFullscreenPass(
+				GraphBuilder,
+				GlobalShaderMap,
+				RDG_EVENT_NAME("Gaussian Splats Colour Composition Pass"),
+				PixelShader,
+				PassParameters,
+				ViewportRect,
+				TStaticBlendState<>::GetRHI(),
+				TStaticRasterizerState<>::GetRHI(),
+				// ZWrite=false, ZTest=Always
+				TStaticDepthStencilState <false, CF_Always>::GetRHI()
+			);
+
+			// Pass 2: Copy the output texture back to "official" SceneColor
+			AddCopyTexturePass(GraphBuilder, OutputTexture, SceneColor.Texture, FRHICopyTextureInfo());
+		}
+		
 
 	}
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4
+	return MoveTemp(SceneColor);
+#else
+	return SceneColor;
+#endif
 }
+
 #endif

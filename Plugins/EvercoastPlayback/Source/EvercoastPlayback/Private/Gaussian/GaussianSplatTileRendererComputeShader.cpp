@@ -4,11 +4,12 @@
 #if PLATFORM_WINDOWS
 
 IMPLEMENT_SHADER_TYPE(, FGaussianSplatTileRendererPreprocessComputeShader, TEXT("/EvercoastShaders/EvercoastGaussianSplatPreprocess.usf"), TEXT("CSCalcViewDataForTileRenderer"), SF_Compute);
-IMPLEMENT_SHADER_TYPE(, FGaussianSplatTileRendererCS, TEXT("/EvercoastShaders/EvercoastGaussianSplatTileRenderer.usf"), TEXT("CSRenderViewDataNoGroupSharedMemory"), SF_Compute);
+//IMPLEMENT_SHADER_TYPE(, FGaussianSplatTileRendererCS, TEXT("/EvercoastShaders/EvercoastGaussianSplatTileRenderer.usf"), TEXT("CSRenderViewDataNoGroupSharedMemory"), SF_Compute);
+IMPLEMENT_SHADER_TYPE(, FGaussianSplatTileRendererCS, TEXT("/EvercoastShaders/EvercoastGaussianSplatTileRenderer.usf"), TEXT("CSRenderViewData"), SF_Compute);
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 bool FGaussianSplatTileRendererPreprocessComputeShader::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 {
-	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM6);
 }
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 3
@@ -83,7 +84,7 @@ void FGaussianSplatTileRendererPreprocessComputeShader::UnbindBuffers(FRHIComman
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 bool FGaussianSplatTileRendererCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 {
-	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM6);
 }
 
 #endif

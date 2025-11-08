@@ -158,6 +158,16 @@ void UEvercoastGaussianSplatCSRendererComp::SetTileRendererHookStage(EGaussianSp
     }
 }
 
+void UEvercoastGaussianSplatCSRendererComp::SetTileRendererAlphaCutoutThreshold(float InAlphaCutout)
+{
+    TileRendererAlphaCutoutThreshold = InAlphaCutout;
+
+    if (SceneProxy)
+    {
+        ((FEvercoastGaussianSplatSceneProxy*)SceneProxy)->SetAlphaCutoutThreshold(InAlphaCutout);
+    }
+}
+
 UMaterialInstanceDynamic* UEvercoastGaussianSplatCSRendererComp::GetNewMaterialInstanceDynamic()
 {
     UMaterialInstanceDynamic* newMaterial = CreateAndSetMaterialInstanceDynamicFromMaterial(0, GaussianSplatMaterial);
@@ -181,7 +191,7 @@ FPrimitiveSceneProxy* UEvercoastGaussianSplatCSRendererComp::CreateSceneProxy()
             Cov2DSqrtKernelSize,    // small gaussian gets blurred and boosted,
             bShowDiffuseColour,
             bShowSphericalHarmonics1Colour, bShowSphericalHarmonics2Colour, bShowSphericalHarmonics3Colour,
-            bEnableTileRendererDepthWrite, TileRendererHookStage
+            bEnableTileRendererDepthWrite, TileRendererHookStage, TileRendererAlphaCutoutThreshold
         );
 
         newSceneProxy->bPerformLateComputeShaderSplatRecon = bReconstructOnTickOnly;

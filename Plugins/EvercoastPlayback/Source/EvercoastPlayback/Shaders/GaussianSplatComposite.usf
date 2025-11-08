@@ -82,10 +82,53 @@ PSOut CompositeDepthPS(VSOut In)
     return Output;
 }
 
+// Pass 3
+Texture2D OriginalGBuffer;
+PSOut GBufferModifierPS(VSOut In)
+{
+    PSOut Output;
+    
+    // VSOut has no TEXCOORD0 semnatics, SV_POSITION is in screen space so calc UV here
+    float2 UV = In.Pos.xy * ViewportSizeInvSize.zw;
+    
+    float2 ExistingColourDepthUV = UV * SceneColorDepthUVScale;
+    float2 SplatColourDepthUV = UV.xy * SplatUVScale;
+    
+    float4 ExistingGBuffer = OriginalGBuffer.Sample(LinearClamp, ExistingColourDepthUV);
+    float4 SplatColour = SplatInputColor.Sample(LinearClamp, SplatColourDepthUV);
+    
+    float ExistingDepth = OriginalSceneDepth.Sample(LinearClamp, ExistingColourDepthUV); // should be same as above
+    float SplatDepth = SplatInputDepth.Sample(LinearClamp, SplatColourDepthUV) + 0.0001; // Ahhh the magic depth bias 
+    
+    if (SplatDepth > ExistingDepth && SplatColour.a > 0.01)
+    {
+        // x = metallic, y = specular, z = roughness, w = shading model
+        // Stencil out the contribution to metallic, specular and roughness
+        Output.Color = float4(0, 0, 0, ExistingGBuffer.w);
+    }
+    else
+    {
+        Output.Color = ExistingGBuffer;
+    }
+    
+    Output.Depth = 0;
+    
+    return Output;
+}
+
+float3 UnrealSRGBToLinear(float3 sRGBColour)
+{
+    float3 low = sRGBColour / 12.92;
+    float3 high = pow((sRGBColour + 0.055) / 1.055, 2.4);
+
+    // Threshold: 0.04045
+    return lerp(high, low, step(sRGBColour, 0.04045));
+}
+
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Pixel shader version of colour composition
-PSOut CompositeColourPS(VSOut In)
+PSOut CompositeColourPostOpaquePS(VSOut In)
 {
     PSOut Output;
     
@@ -108,7 +151,7 @@ PSOut CompositeColourPS(VSOut In)
         
         // Blend the splat colour as premultiplied alpha, because the way the tile renderer accumulates colour has essentially alpha premultiplied
         // The sRGB->linear conversion in the splat colour map generation, for some reason, will have rgb exceeds [0, 1] range so clamp it here
-        float4 OutputColor = float4(clamp(SplatColour.rgb, 0, 1) + (1 - SplatColour.a) * ExistingColour.rgb, ExistingColour.a);
+        float4 OutputColor = float4(clamp(UnrealSRGBToLinear(SplatColour.rgb), 0, 1) + (1 - SplatColour.a) * ExistingColour.rgb, ExistingColour.a);
 
         // Write output
         Output.Color = OutputColor;
@@ -146,15 +189,14 @@ PSOut CompositeColourOverlayPS(VSOut In)
     if (SplatDepth > ExistingDepth)
     {
         // Z test passes
-        
         // Blend the splat colour as premultiplied alpha, because the way the tile renderer accumulates colour has essentially alpha premultiplied
         // The sRGB->linear conversion in the splat colour map generation, for some reason, will have rgb exceeds [0, 1] range so clamp it here
-        float4 OutputColor = float4(clamp(SplatColour.rgb, 0, 1) + (1 - SplatColour.a) * ExistingColour.rgb, ExistingColour.a);
+        float4 OutputColor = float4(clamp(UnrealSRGBToLinear(SplatColour.rgb), 0, 1) + (1 - SplatColour.a) * ExistingColour.rgb, ExistingColour.a);
         
         // Write output
         Output.Color = OutputColor;
     }
-        else
+    else
     {
         // Z test fails
         Output.Color = ExistingColour;
@@ -164,3 +206,42 @@ PSOut CompositeColourOverlayPS(VSOut In)
     return Output;
 }
 
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Pixel shader version of colour composition
+PSOut CompositeColourPostToneMappingPS(VSOut In)
+{
+    PSOut Output;
+    
+    // VSOut has no TEXCOORD0 semnatics, SV_POSITION is in screen space so calc UV here
+    float2 UV = In.Pos.xy * ViewportSizeInvSize.zw;
+    
+    float2 ExistingColourDepthUV = UV * SceneColorDepthUVScale;
+    float2 SplatColourDepthUV = UV.xy * SplatUVScale;
+    
+    float4 ExistingColour = OriginalSceneColor.Sample(LinearClamp, ExistingColourDepthUV);
+    float ExistingDepth = LookupDeviceZ(ExistingColourDepthUV); // same UV as used for colour map
+    
+    float4 SplatColour = SplatInputColor.Sample(LinearClamp, SplatColourDepthUV);
+    float SplatDepth = SplatInputDepth.Sample(LinearClamp, SplatColourDepthUV) + 0.0001; // Ahhh the magic depth bias 
+
+    if (SplatDepth > ExistingDepth)
+    {
+        // Z test passes
+        // Blend the splat colour as premultiplied alpha, because the way the tile renderer accumulates colour has essentially alpha premultiplied
+        // The sRGB->linear conversion in the splat colour map generation, for some reason, will have rgb exceeds [0, 1] range so clamp it here
+        float4 OutputColor = float4(clamp(SplatColour.rgb, 0, 1) + (1 - SplatColour.a) * ExistingColour.rgb, ExistingColour.a);
+        
+        // Write output
+        Output.Color = OutputColor;
+    }
+    else
+    {
+        // Z test fails
+        Output.Color = ExistingColour;
+    }
+        
+    Output.Depth = ExistingDepth;
+
+    return Output;
+}

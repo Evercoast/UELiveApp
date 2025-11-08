@@ -3,7 +3,7 @@
 
 FEvercoastGaussianSplatShadowingSceneProxy::FEvercoastGaussianSplatShadowingSceneProxy(const UEvercoastGaussianSplatShadowCasterComp* component, UMaterialInterface* material,
 	bool onlyReconOnTick, float shadowDecimate, float shadowBlobScale) :
-	FEvercoastGaussianSplatSceneProxy(component, material, EGaussianSplatRendererType::QUAD_RENDERER, shadowDecimate, 1.0f, 0.0f, false, false, false, false, false, EGaussianSplatHookStage::POST_OPAQUE),
+	FEvercoastGaussianSplatSceneProxy(component, material, EGaussianSplatRendererType::QUAD_RENDERER, shadowDecimate, 1.0f, 0.0f, false, false, false, false, false, EGaussianSplatHookStage::POST_OPAQUE, 0),
 	MaterialRelevance(component->GetMaterialRelevance(GetScene().GetFeatureLevel()))
 {
 	bPerformLateComputeShaderSplatRecon = onlyReconOnTick;

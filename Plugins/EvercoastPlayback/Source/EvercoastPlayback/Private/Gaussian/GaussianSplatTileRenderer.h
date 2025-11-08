@@ -27,7 +27,7 @@ public:
 	FGaussianSplatTileRenderer& operator=(FGaussianSplatTileRenderer&&) = delete;
 
 	void SaveInput(const FMatrix& ObjectToWorld, const FMatrix& InView, const FMatrix& InProj, const FVector& InCameraPositionWS, const FVector4& InScreenParam, float cov2DSqrtKernelSize,
-		bool showSH0, bool showSH1, bool showSH2, bool showSH3, std::shared_ptr<const EvercoastGaussianSplatCSResult> InGaussianData);
+		bool showSH0, bool showSH1, bool showSH2, bool showSH3, const FVector4& InDepthOutputThreshold, std::shared_ptr<const EvercoastGaussianSplatCSResult> InGaussianData);
 
 	FTextureRHIRef GetOutputColourRenderTarget() const;
 	FTextureRHIRef GetOutputDepthRenderTarget() const;
@@ -53,11 +53,11 @@ private:
 	void ReleaseSecondStageResources();
 
 	bool RunPipeline_RenderThread(FRHICommandListImmediate& RHICmdList, const FMatrix& ObjectToWorld, const FMatrix& InView, const FMatrix& InProj, const FVector& InCameraPositionWS, const FVector4& InScreenParam, float cov2DSqrtKernelSize,
-		bool showSH0, bool showSH1, bool showSH2, bool showSH3, std::shared_ptr<const EvercoastGaussianSplatCSResult> InGaussianData);
+		bool showSH0, bool showSH1, bool showSH2, bool showSH3, const FVector4& DepthOutputThreshold, std::shared_ptr<const EvercoastGaussianSplatCSResult> InGaussianData);
 
 	uint32_t RunFirstStagePipeline_RenderThread(FRHICommandListImmediate& RHICmdList, const FMatrix& InObjectToWorld, const FMatrix& InView, const FMatrix& InProj, const FVector& InCameraPositionWS,
 		uint32_t numSplats, const FVector4& InScreenParam, float InCov2DSqrtKernelSize, bool InShowSH0, bool InShowSH1, bool InShowSH2, bool InShowSH3);
-	bool RunSecondStagePipeline_RenderThread(FRHICommandListImmediate& RHICmdList, uint32_t numSplats, uint32_t numTileConjugateSplat, const FVector4& InScreenParam);
+	bool RunSecondStagePipeline_RenderThread(FRHICommandListImmediate& RHICmdList, uint32_t numSplats, uint32_t numTileConjugateSplat, const FVector4& InScreenParam, const FVector4& DepthOutputThreshold);
 private:
 	// Bookkeeping
 	std::shared_ptr<const EvercoastGaussianSplatCSResult> m_encodedGaussianSplats;
@@ -152,6 +152,7 @@ private:
 	bool SavedShowSH1;
 	bool SavedShowSH2;
 	bool SavedShowSH3;
+	FVector4 SavedDepthOutputThreshold;
 	std::shared_ptr<const EvercoastGaussianSplatCSResult> SavedEncodedGaussianSplats;
 	FVector2f SavedOutputRenderTargetUVScale;
 };

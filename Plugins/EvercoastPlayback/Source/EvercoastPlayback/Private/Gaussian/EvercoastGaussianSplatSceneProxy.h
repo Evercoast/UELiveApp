@@ -24,7 +24,7 @@ public:
 	FEvercoastGaussianSplatSceneProxy(const UEvercoastGaussianSplatCSRendererComp* component, UMaterialInterface* material,
 		EGaussianSplatRendererType rendererType,
 		float splatDecimation, float splatExtraScale, float cov2DSqrtKernelSize, bool showDiffuseColour, bool showSH1Colour, bool showSH2Colour, bool showSH3Colour,
-		bool enableTileRendererDepthWrite, EGaussianSplatHookStage tileRendererHookStage);
+		bool enableTileRendererDepthWrite, EGaussianSplatHookStage tileRendererHookStage, float InAlphaCutoutThreshold);
 	virtual ~FEvercoastGaussianSplatSceneProxy();
 
 	/** Return a type (or subtype) specific hash for sorting purposes */
@@ -61,7 +61,7 @@ public:
 
 	void SaveEssentialReconData(const FMatrix& ObjectToWorld, const FMatrix& InView, const FMatrix& InProj, const FVector& InCameraPositionWS, 
 		const FVector4& InScreenParam, bool isShadowPass, float InDecimation, float InSplatExtraScale, float InCov2DSqrtKernelSize, 
-		bool showSH0Colour, bool showSH1Colour, bool showSH2Colour, bool showSH3Colour, std::shared_ptr<const EvercoastGaussianSplatCSResult> InGaussianData) const;
+		bool showSH0Colour, bool showSH1Colour, bool showSH2Colour, bool showSH3Colour, const FVector4& InDepthOutputThreshold, std::shared_ptr<const EvercoastGaussianSplatCSResult> InGaussianData) const;
 	void PerformLateComputeShaderSplatRecon();
 
 	bool bPerformLateComputeShaderSplatRecon;
@@ -79,6 +79,7 @@ public:
 	void SetRendererType(EGaussianSplatRendererType newType);
 	void EnableTileRendererDepthWrite(bool enableDepthWrite);
 	void SetTileRendererHookStage(EGaussianSplatHookStage stage);
+	void SetAlphaCutoutThreshold(float InAlphaCutout);
 
 protected:
 	// Return regular camera view matrix
@@ -90,7 +91,8 @@ private:
 
 	void PerformDataReconForTileRenderer(const FMatrix& InObjectToWorld, const FMatrix& InView, const FMatrix& InProj,
 		const FVector& InCameraPositionWS, const FVector4& InScreenParam, float InCov2DSqrtKernelSize,
-		bool showSH0Colour, bool showSH1Colour, bool showSH2Colour, bool showSH3Colour, std::shared_ptr<const EvercoastGaussianSplatCSResult> encodedGaussian) const;
+		bool showSH0Colour, bool showSH1Colour, bool showSH2Colour, bool showSH3Colour, const FVector4& InDepthOutputThreshold,
+		std::shared_ptr<const EvercoastGaussianSplatCSResult> encodedGaussian) const;
 
 	// remove constantness requirement in GetDynamicMeshElements() const
 	mutable FEvercoastGaussianSplatVertexFactory m_vertexFactory;
@@ -120,6 +122,7 @@ private:
 	bool m_splatShowSH2;
 	bool m_splatShowSH3;
 	bool m_tileRendererDepthWrite;
+	FVector4 m_depthOutputThreshold; // x = enable depth write, w = alpha cutout threshold
 
 	/** The view relevance for the gaussian material. Critical for GetViewRelevance() */
 	FMaterialRelevance MaterialRelevance;
@@ -135,6 +138,7 @@ private:
 	mutable float SavedSplatExtraScale;
 	mutable float SavedCov2DSqrtKernelSize;
 	mutable bool SavedShowSHColour[4];
+	mutable FVector4 SavedDepthOutputThreshold;
 	mutable std::shared_ptr<const EvercoastGaussianSplatCSResult> SavedEncodedGaussian;
 
 #if RHI_RAYTRACING

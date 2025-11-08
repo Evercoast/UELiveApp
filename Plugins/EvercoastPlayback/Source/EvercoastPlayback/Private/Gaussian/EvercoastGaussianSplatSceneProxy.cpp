@@ -9,7 +9,7 @@
 FEvercoastGaussianSplatSceneProxy::FEvercoastGaussianSplatSceneProxy(const UEvercoastGaussianSplatCSRendererComp* component, UMaterialInterface* material,
 	EGaussianSplatRendererType rendererType,
 	float splatDecimation, float splatExtraScale, float cov2DSqrtKernelSize, bool showDiffuseColour, bool showSH1Colour, bool showSH2Colour, bool showSH3Colour,
-	bool enableTileRendererDepthWrite, EGaussianSplatHookStage tileRendererHookStage) :
+	bool enableTileRendererDepthWrite, EGaussianSplatHookStage tileRendererHookStage, float InAlphaCutoutThreshold) :
 	FPrimitiveSceneProxy(component),
 	m_vertexFactory(GetScene().GetFeatureLevel(), "GaussianSplatOrientedQuadVertexFactory"),
 	m_material(material),
@@ -28,6 +28,7 @@ FEvercoastGaussianSplatSceneProxy::FEvercoastGaussianSplatSceneProxy(const UEver
 	m_splatShowSH2(showSH2Colour),
 	m_splatShowSH3(showSH3Colour),
 	m_tileRendererDepthWrite(enableTileRendererDepthWrite),
+	m_depthOutputThreshold(FVector4(0, 0, 0, InAlphaCutoutThreshold)),
 	MaterialRelevance(component->GetMaterialRelevance(GetScene().GetFeatureLevel()))
 {
 	InitialiseQuadMesh();
@@ -192,7 +193,7 @@ bool FEvercoastGaussianSplatSceneProxy::ShouldSubmitDynamicMesh(const FSceneView
 
 void FEvercoastGaussianSplatSceneProxy::SaveEssentialReconData(const FMatrix& ObjectToWorld, const FMatrix& InView, const FMatrix& InProj, 
 	const FVector& InCameraPositionWS, const FVector4& InScreenParam, bool isShadowPass, float InDecimation, float InSplatExtraScale, float InCov2DSqrtKernelSize, 
-	bool showSH0Colour, bool showSH1Colour, bool showSH2Colour, bool showSH3Colour, std::shared_ptr<const EvercoastGaussianSplatCSResult> InGaussianData) const
+	bool showSH0Colour, bool showSH1Colour, bool showSH2Colour, bool showSH3Colour, const FVector4& InDepthOutputThreshold, std::shared_ptr<const EvercoastGaussianSplatCSResult> InGaussianData) const
 {
 	SavedObjectToWorld = ObjectToWorld;
 	SavedView = InView;
@@ -208,6 +209,7 @@ void FEvercoastGaussianSplatSceneProxy::SaveEssentialReconData(const FMatrix& Ob
 	SavedShowSHColour[1] = showSH1Colour;
 	SavedShowSHColour[2] = showSH2Colour;
 	SavedShowSHColour[3] = showSH3Colour;
+	SavedDepthOutputThreshold = InDepthOutputThreshold;
 
 }
 
@@ -225,21 +227,30 @@ void FEvercoastGaussianSplatSceneProxy::PerformLateComputeShaderSplatRecon()
 	else
 	{
 		PerformDataReconForTileRenderer(SavedObjectToWorld, SavedView, SavedProj, SavedCameraPositionWS, SavedScreenParam, SavedCov2DSqrtKernelSize,
-			SavedShowSHColour[0], SavedShowSHColour[1], SavedShowSHColour[2], SavedShowSHColour[3], SavedEncodedGaussian);
+			SavedShowSHColour[0], SavedShowSHColour[1], SavedShowSHColour[2], SavedShowSHColour[3], SavedDepthOutputThreshold, SavedEncodedGaussian);
 	}
 }
 
 void FEvercoastGaussianSplatSceneProxy::PerformDataReconForTileRenderer(const FMatrix& InObjectToWorld, const FMatrix& InView, const FMatrix& InProj,
 	const FVector& InCameraPositionWS, const FVector4& InScreenParam, float InCov2DSqrtKernelSize,
-	bool showSH0Colour, bool showSH1Colour, bool showSH2Colour, bool showSH3Colour, std::shared_ptr<const EvercoastGaussianSplatCSResult> encodedGaussian) const
+	bool showSH0Colour, bool showSH1Colour, bool showSH2Colour, bool showSH3Colour, const FVector4& InDepthOutputThreshold, std::shared_ptr<const EvercoastGaussianSplatCSResult> encodedGaussian) const
 {
 #if PLATFORM_WINDOWS
 	check(m_tileRenderer);
 	check(m_rendererType == EGaussianSplatRendererType::TILE_RENDERER);
 
+	FVector4 DepthOutputAlphaCutout = InDepthOutputThreshold;
+	if (m_tileRendererDepthWrite)
+	{
+		DepthOutputAlphaCutout.X = 1.0;
+	}
+	else
+	{
+		DepthOutputAlphaCutout.X = 0;
+	}
 
 	m_tileRenderer->SaveInput(InObjectToWorld, InView, InProj, InCameraPositionWS, InScreenParam, InCov2DSqrtKernelSize,
-		showSH0Colour, showSH1Colour, showSH2Colour, showSH3Colour, encodedGaussian);
+		showSH0Colour, showSH1Colour, showSH2Colour, showSH3Colour, DepthOutputAlphaCutout, encodedGaussian);
 
 	UGaussianSplatCompositeSubsystem* gsComposite = GEngine->GetEngineSubsystem<UGaussianSplatCompositeSubsystem>();
 	FVector WorldPos = FVector(InObjectToWorld.M[3][0], InObjectToWorld.M[3][1], InObjectToWorld.M[3][2]);
@@ -304,7 +315,7 @@ void FEvercoastGaussianSplatSceneProxy::GetDynamicMeshElements(
 			{
 				// Do not recon the splats for every rendering, only do it when tick happens
 				SaveEssentialReconData(ObjectToWorld, ViewMatrix, ProjMatrix, pView->ViewLocation, ScreenParams, bIsRenderingShadow, m_splatDecimation, m_splatExtraScale, m_cov2DSqrtKernelSize, 
-					m_splatShowDiffuse, m_splatShowSH1, m_splatShowSH2, m_splatShowSH3, m_encodedGaussian);
+					m_splatShowDiffuse, m_splatShowSH1, m_splatShowSH2, m_splatShowSH3, m_depthOutputThreshold, m_encodedGaussian);
 			}
 			else
 			{
@@ -319,7 +330,7 @@ void FEvercoastGaussianSplatSceneProxy::GetDynamicMeshElements(
 				{
 					// Tile renderer
 					PerformDataReconForTileRenderer(ObjectToWorld, ViewMatrix, ProjMatrix, pView->ViewLocation, ScreenParams, m_cov2DSqrtKernelSize,
-						m_splatShowDiffuse, m_splatShowSH1, m_splatShowSH2, m_splatShowSH3, m_encodedGaussian);
+						m_splatShowDiffuse, m_splatShowSH1, m_splatShowSH2, m_splatShowSH3, m_depthOutputThreshold, m_encodedGaussian);
 				}
 			}
 
@@ -573,6 +584,11 @@ void FEvercoastGaussianSplatSceneProxy::EnableTileRendererDepthWrite(bool tileRe
 void FEvercoastGaussianSplatSceneProxy::SetTileRendererHookStage(EGaussianSplatHookStage stage)
 {
 	m_tileRendererHookStage = stage;
+}
+
+void FEvercoastGaussianSplatSceneProxy::SetAlphaCutoutThreshold(float InAlphaCutout)
+{
+	m_depthOutputThreshold.W = InAlphaCutout;
 }
 
 void FEvercoastGaussianSplatSceneProxy::SetEncodedGaussianSplat_RenderThread(FRHICommandListBase& RHICmdList, std::shared_ptr<const EvercoastGaussianSplatCSResult> data)

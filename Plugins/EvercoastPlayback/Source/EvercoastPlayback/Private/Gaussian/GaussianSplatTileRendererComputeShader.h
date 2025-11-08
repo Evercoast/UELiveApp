@@ -79,6 +79,7 @@ public:
         SHADER_PARAMETER(uint32_t, NumTileConjugateSplat)
 		SHADER_PARAMETER(FVector4f, VecScreenParams)
         SHADER_PARAMETER(FUintVector2, OutputTextureSize)
+        SHADER_PARAMETER(FVector4f, DepthOutputThreshold)
 
 		SHADER_PARAMETER_SRV(StructuredBuffer<SplatView>, TheSplatViewData)
         SHADER_PARAMETER_SRV(StructuredBuffer<uint32_t>, TileConjugateSplatValuesSorted)

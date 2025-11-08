@@ -8,7 +8,7 @@ IMPLEMENT_SHADER_TYPE(, FGaussianSplatInitSortDataCS, TEXT("/EvercoastShaders/Ev
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 bool FGaussianSplatQuadRendererPreprocessComputeShader::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 {
-	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM6);
 }
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 3
@@ -98,5 +98,5 @@ void FGaussianSplatQuadRendererPreprocessComputeShader::UnbindBuffers(FRHIComman
 // FGaussianSplatInitSortDataCS
 bool FGaussianSplatInitSortDataCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 {
-	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM6);
 }

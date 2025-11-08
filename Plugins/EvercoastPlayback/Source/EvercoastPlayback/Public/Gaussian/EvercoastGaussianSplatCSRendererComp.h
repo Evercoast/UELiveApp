@@ -35,6 +35,7 @@ enum class EGaussianSplatHookStage : uint8
 {
     POST_OPAQUE = 0 UMETA(DisplayName = "Post Opaque(Before Translucency)"),
     OVERLAY = 1 UMETA(DisplayName = "Overlay(After Translucency)"),
+    POST_TONEMAPPING = 2 UMETA(DisplayName = "Post Tonemapping(After Tonemapping and colour space conversion)"),
 };
 
 class EvercoastGaussianSplatCSUploader;
@@ -58,7 +59,7 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetReconstructOnTickOnly, Category = "Rendering")
     bool bReconstructOnTickOnly;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetSplatExtraScale, meta = (UIMin = "0.0", UIMax = "2.0"), Category = "Rendering")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetSplatExtraScale, meta = (EditCondition = "rendererType == EGaussianSplatRendererType::QUAD_RENDERER", EditConditionHides, UIMin = "0.0", UIMax = "2.0"), Category = "Rendering")
     float SplatExtraScale = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetCov2DSqrtKernelSize, meta = (UIMin = "0.0", UIMax = "1.0"), Category = "Rendering")
@@ -76,11 +77,14 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetShowSphericalHarmonics3, Category = "Rendering")
     bool bShowSphericalHarmonics3Colour = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetEnableTileRendererDepthWrite, Category = "Rendering")
-    bool bEnableTileRendererDepthWrite = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetTileRendererHookStage, Category = "Rendering")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetTileRendererHookStage, meta = (EditCondition = "rendererType == EGaussianSplatRendererType::TILE_RENDERER", EditConditionHides), Category = "Rendering")
     EGaussianSplatHookStage TileRendererHookStage = EGaussianSplatHookStage::OVERLAY;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetEnableTileRendererDepthWrite, meta = (EditCondition = "rendererType == EGaussianSplatRendererType::TILE_RENDERER", EditConditionHides), Category = "Rendering")
+    bool bEnableTileRendererDepthWrite = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetTileRendererAlphaCutoutThreshold, meta = (UIMin = "0.0", UIMax = "1.0", EditCondition = "rendererType == EGaussianSplatRendererType::TILE_RENDERER && bEnableTileRendererDepthWrite", EditConditionHides), Category = "Rendering")
+    float TileRendererAlphaCutoutThreshold = 0.667f;
 
     // ~ Begin UPrimitiveComponent Interface.
     virtual FPrimitiveSceneProxy* CreateSceneProxy() override;
@@ -132,7 +136,11 @@ public:
     virtual void SetEnableTileRendererDepthWrite(bool enableDepthWrite);
 
     UFUNCTION(BlueprintSetter)
-    virtual void SetTileRendererHookStage(EGaussianSplatHookStage stage);
+    void SetTileRendererHookStage(EGaussianSplatHookStage stage);
+
+    UFUNCTION(BlueprintSetter)
+    void SetTileRendererAlphaCutoutThreshold(float InAlphaCutout);
+    
 protected:
     //~ Begin UActorComponent interface
 #if WITH_EDITOR

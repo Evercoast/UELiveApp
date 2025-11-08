@@ -27,10 +27,14 @@ public:
 	FGaussianSplatTileRendererSceneViewExtension(const FAutoRegister& AutoRegister);
 
 public:
-	virtual void SetupViewFamily(FSceneViewFamily& InViewFamily) override {};
-	virtual void SetupView(FSceneViewFamily& InViewFamily, FSceneView& InView) override {};
-	virtual void BeginRenderViewFamily(FSceneViewFamily& InViewFamily) override {};
-
+	virtual void SetupViewFamily(FSceneViewFamily& InViewFamily) override {}
+	virtual void SetupView(FSceneViewFamily& InViewFamily, FSceneView& InView) override {}
+	virtual void BeginRenderViewFamily(FSceneViewFamily& InViewFamily) override {}
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 5
+	virtual void SubscribeToPostProcessingPass(EPostProcessingPass Pass, const FSceneView& InView, FAfterPassCallbackDelegateArray& InOutPassCallbacks, bool bIsPassEnabled) override;
+#else
+	virtual void SubscribeToPostProcessingPass(EPostProcessingPass PassId, FAfterPassCallbackDelegateArray& InOutPassCallbacks, bool bIsPassEnabled) override;
+#endif
 	// If we need Gaussians to occlude other Gaussians properly, then we'll have to inject our depth in depth prepass, so that camera view can have an aligned depth information to test with
 	// Using quad-renderer's depth will introduce lots of artefacts and it won't work well with transparent-quad based quad renderer
 	// PostRenderBasePassDeferred_RenderThread is called right after Base Pass. This the place we blend in splat's depth
@@ -87,6 +91,8 @@ private:
 	void ClearRegisteredSplatImages();
 	void ClearRegisteredTileRenderer();
 
+	FScreenPassTexture OnPostProcessingTonemap(FRDGBuilder& GraphBuilder, const FSceneView& SceneView, const FPostProcessMaterialInputs& Inputs);
+
 
 
 	std::recursive_mutex m_imageMutex;
@@ -97,8 +103,7 @@ private:
 
 	FDelegateHandle m_postOpaqueRenderHandle;
 	FDelegateHandle m_overlayRenderHandle;
-
-	FIntRect m_lastPostOpaqueViewportRect;// save this information to help next frame depth blending
+	FDelegateHandle m_resolvedSceneColorRenderHandle;
 
 };
 
@@ -131,7 +136,7 @@ public:
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 	{
-		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM6);
 	}
 };
 
@@ -158,11 +163,36 @@ public:
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 	{
-		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM6);
 	}
 
 };
 
+
+class FGaussianSplatEngineGBufferModifierPixelShader : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FGaussianSplatEngineGBufferModifierPixelShader)
+	SHADER_USE_PARAMETER_STRUCT(FGaussianSplatEngineGBufferModifierPixelShader, FGlobalShader)
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_TEXTURE(Texture2D, SplatInputColor)
+		SHADER_PARAMETER_TEXTURE(Texture2D, SplatInputDepth)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, OriginalGBuffer)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, OriginalSceneDepth)
+		SHADER_PARAMETER(FVector4f, ViewportSizeInvSize)
+		SHADER_PARAMETER(FVector2f, SceneColorDepthUVScale)
+		SHADER_PARAMETER(FVector2f, SplatUVScale)
+
+		SHADER_PARAMETER_SAMPLER(SamplerState, LinearClamp)
+		RENDER_TARGET_BINDING_SLOTS()
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM6);
+	}
+};
 
 // Gaussian Splat Fullscreen Colour Composition Shader
 class FGaussianSplatCompositeColourPixelShader : public FGlobalShader
@@ -175,7 +205,6 @@ public:
 		SHADER_PARAMETER_STRUCT_INCLUDE(FCommonShaderParameters, CommonParameters)
 		SHADER_PARAMETER_RDG_UNIFORM_BUFFER(FSceneTextureUniformParameters, SceneTextures)
 		SHADER_PARAMETER(FVector4f, ViewportSizeInvSize)
-		SHADER_PARAMETER(FVector4f, SceneDepthSizeInvSize)
 		SHADER_PARAMETER(FVector2f, SceneColorDepthUVScale)
 		SHADER_PARAMETER(FVector2f, SplatUVScale)
 		SHADER_PARAMETER_SAMPLER(SamplerState, LinearClamp)
@@ -184,7 +213,6 @@ public:
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, OriginalSceneDepth)
 		SHADER_PARAMETER_TEXTURE(Texture2D, SplatInputColor)
 		SHADER_PARAMETER_TEXTURE(Texture2D, SplatInputDepth)
-		SHADER_PARAMETER(FVector4f, SplatInputColorDepthSizeInvSize)
 
 		RENDER_TARGET_BINDING_SLOTS()
 	END_SHADER_PARAMETER_STRUCT()
@@ -192,7 +220,7 @@ public:
 	// Basic shader stuff
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 	{
-		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM6);
 	}
 };
 
@@ -205,7 +233,6 @@ public:
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER(FVector4f, ViewportSizeInvSize)
-		SHADER_PARAMETER(FVector4f, SceneDepthSizeInvSize)
 		SHADER_PARAMETER(FVector2f, SceneColorDepthUVScale)
 		SHADER_PARAMETER(FVector2f, SplatUVScale)
 		SHADER_PARAMETER_SAMPLER(SamplerState, LinearClamp)
@@ -214,7 +241,6 @@ public:
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, OriginalSceneDepth)
 		SHADER_PARAMETER_TEXTURE(Texture2D, SplatInputColor)
 		SHADER_PARAMETER_TEXTURE(Texture2D, SplatInputDepth)
-		SHADER_PARAMETER(FVector4f, SplatInputColorDepthSizeInvSize)
 
 		RENDER_TARGET_BINDING_SLOTS()
 	END_SHADER_PARAMETER_STRUCT()
@@ -222,9 +248,35 @@ public:
 	// Basic shader stuff
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 	{
-		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM6);
 	}
 };
 
+class FGaussianSplatCompositeColourPostToneMappingPixelShader : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FGaussianSplatCompositeColourPostToneMappingPixelShader)
+	SHADER_USE_PARAMETER_STRUCT(FGaussianSplatCompositeColourPostToneMappingPixelShader, FGlobalShader)
 
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_STRUCT_INCLUDE(FCommonShaderParameters, CommonParameters)
+		SHADER_PARAMETER_RDG_UNIFORM_BUFFER(FSceneTextureUniformParameters, SceneTextures)
+		SHADER_PARAMETER(FVector4f, ViewportSizeInvSize)
+		SHADER_PARAMETER(FVector2f, SceneColorDepthUVScale)
+		SHADER_PARAMETER(FVector2f, SplatUVScale)
+		SHADER_PARAMETER_SAMPLER(SamplerState, LinearClamp)
+
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, OriginalSceneColor)
+		SHADER_PARAMETER_TEXTURE(Texture2D, SplatInputColor)
+		SHADER_PARAMETER_TEXTURE(Texture2D, SplatInputDepth)
+
+		RENDER_TARGET_BINDING_SLOTS()
+	END_SHADER_PARAMETER_STRUCT()
+
+	// Basic shader stuff
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM6);
+	}
+};
 #endif

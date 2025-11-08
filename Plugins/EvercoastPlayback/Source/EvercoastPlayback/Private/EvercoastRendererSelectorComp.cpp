@@ -125,6 +125,20 @@ void UEvercoastRendererSelectorComp::ResetRendererSelection()
     m_currRenderer = nullptr;
 }
 
+template<typename T>
+static T* FindExactComponent(AActor* Actor)
+{
+	if (!Actor)
+		return nullptr;
+
+	for (UActorComponent* Comp : Actor->GetComponents())
+	{
+		if (Comp && Comp->GetClass() == T::StaticClass())
+			return Cast<T>(Comp);
+	}
+	return nullptr;
+}
+
 void UEvercoastRendererSelectorComp::ChooseCorrespondingSubRenderer(DecoderType decoderType)
 {
 	auto Actor = GetOwner();
@@ -226,7 +240,7 @@ void UEvercoastRendererSelectorComp::ChooseCorrespondingSubRenderer(DecoderType 
 		if(!m_gaussianRenderer)
 		{
 			// main renderer
-			auto existingGaussianComponent = Actor->FindComponentByClass<UEvercoastGaussianSplatCSRendererComp>();
+			auto existingGaussianComponent = FindExactComponent<UEvercoastGaussianSplatCSRendererComp>(Actor);
 			if (existingGaussianComponent)
 			{
 				m_gaussianRenderer = existingGaussianComponent;

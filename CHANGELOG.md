@@ -1,3 +1,7 @@
+# 0.9.1
+- Improved Gaussian Splat rendering quality along with correct blending with transparent and reflective objects
+- Fixed the scene loading crash issue
+
 # 0.9.0
 - Add Gaussian Splat tile renderer support
 

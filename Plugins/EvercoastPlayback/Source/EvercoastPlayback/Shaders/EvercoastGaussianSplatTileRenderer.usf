@@ -9,6 +9,8 @@
 
 #include "Quaternion.ush"
 
+#define MAX_SPLATS_IN_TILE (65536)
+
 ///////////////////////
 // DATA FROM PREVIOUS STAGE
 uint SplatCount;
@@ -26,6 +28,7 @@ StructuredBuffer<uint2> TileToSplatRanges;         // Size = (TileCountX * TileC
 RWTexture2D<float4> OutputColourTexture;               // output GPU colour texture
 RWTexture2D<float> OutputDepthTexture;                 // output GPU depth texture
 uint2 OutputTextureSize;
+float4 DepthOutputThreshold; // x = enable depth write, w = alpha cutout threshold
 
 // From above to follows, using SortGPUBuffers() on CPU
 StructuredBuffer<uint> TileConjugateSplatValuesSorted; // value = splat_index(index of TheSplatViewData), sorted
@@ -43,7 +46,7 @@ float4 VecScreenParams;
 // BUT TRY SQUEEZING (TILE_ID|DEPTH) INTO 32BIT FIRST
 
 
-// Assume inst_id < _NumSplats, this is the main interface to retrieve sorted SplatView index
+// Assume inst_id < NumTileConjugateSplat, this is the main interface to retrieve sorted SplatView index
 uint GetSortedSplatViewIndex(uint inst_id)
 {
     return TileConjugateSplatValuesSorted[inst_id];
@@ -69,50 +72,51 @@ bool CalcAlpha(float4 con_o, float2 mean, uint2 pixf, out float alpha)
     return true;
 }
 
-float3 UnrealSRGBToLinear(float3 sRGBColour)
-{
-    float3 low = sRGBColour / 12.92;
-    float3 high = pow((sRGBColour + 0.055) / 1.055, 2.4);
-
-    // Threshold: 0.04045
-    return lerp(high, low, step(sRGBColour, 0.04045));
-}
 
 ///////////////////////
 // GROUP SHARED MEMORY
 // From MS: Groupshared memory is limited to 16KB per group. A single thread is limited to 256 byte region of groupshared memory for writing.
+// But from reaity the compiler gives error: Total Thread Group Shared Memory storage is 45056, exceeded 32768. <- which means SM6 has 32K group shared memory limit
+// Also from MS: A Compute Shader thread may only write to its own region of TGSM. This write-only region has a maximum size of 256 bytes or less, with the maximum decreasing as the number of threads declared for the group increases.
+/*
+Number of Threads in Group	Maximum TGSM Size Per Thread
+0-64                        256
+65-68                       240
+69-72                       224
+73-76                       208
+77-84                       192
+85-92                       176
+93-100                      160
+101-112                     144
+113-128                     128
+129-144                     112
+145-168                     96
+169-204                     80
+205-256                     64
+257-340                     48
+341-512                     32
+513-768                     16
+*/
+
 groupshared int collected_id[COLLECTOR_BATCH_SIZE];
 groupshared float2 collected_xy[COLLECTOR_BATCH_SIZE];
 groupshared float4 collected_conic_opacity[COLLECTOR_BATCH_SIZE];
-groupshared int gs_maxBatches;
+groupshared float4 collected_rgbz[COLLECTOR_BATCH_SIZE]; // RGB + clipZ
 
-#if 0
 // Dispatch 5
-// FIXME: The use of groupshared memory is still showing artifacts
+// Each thread is a pixel
+// Each thread group is a tile
 [numthreads(TILE_SIZE, TILE_SIZE, 1)]
 void CSRenderViewData(uint3 groupID : SV_GroupID,
             uint3 threadIDInGroup : SV_GroupThreadID,
             uint3 dispatchThreadID : SV_DispatchThreadID)
 {
-    
-    /*
-    // Make sure raster_done_count is initialized per group
-    if (threadIDInGroup.x == 0 && threadIDInGroup.y == 0)
-    {
-        raster_done_count = 0;
-    }
-    GroupMemoryBarrierWithGroupSync();
-    */
-    
-    if (threadIDInGroup.x == 0 && threadIDInGroup.y == 0)
-        gs_maxBatches = 0;
-    
-    GroupMemoryBarrierWithGroupSync();
-
+ 
     uint2 localPos = threadIDInGroup.xy;
-    uint2 globalPos = uint2(
-        groupID.x * TILE_SIZE + localPos.x,
-        groupID.y * TILE_SIZE + localPos.y); // Or just use dispatchThreadID.xy
+    //uint2 globalPos = uint2(
+        //groupID.x * TILE_SIZE + localPos.x,
+        //groupID.y * TILE_SIZE + localPos.y); // Or just use dispatchThreadID.xy
+    uint2 globalPos = dispatchThreadID.xy;
     
     // TODO: precompute
     uint W = (uint) VecScreenParams.x;
@@ -136,17 +140,13 @@ void CSRenderViewData(uint3 groupID : SV_GroupID,
     // .xy contains splatIdx. range.x = lower bound splatIdx(inclusive), range.y = upper bound splatIdx (exclusive)
     // fetch sorted splats index range     
     uint2 splatRange = TileToSplatRanges[flattenGroupId];
-    uint splatIndexStart = splatRange.x;
-    uint splatIndexEnd = splatRange.y; // exclusive
+    int splatIndexStart = (int)splatRange.x;
+    int splatIndexEnd = (int)splatRange.y; // exclusive
+    int remainedSplats = clamp(splatIndexEnd - splatIndexStart, 0, MAX_SPLATS_IN_TILE);
+    
     // Use groupshared memory in Compute shader, to mimic cooperative groups in CUDA
     // the num of splats in each batch must be equal or smaller than COLLECTOR_BATCH_SIZE
     const int numBatches = ((splatIndexEnd - splatIndexStart + COLLECTOR_BATCH_SIZE - 1) / COLLECTOR_BATCH_SIZE); // the num of rounds can be arbitrary actually, doesn't have to be associated with BLOCK_SIZE. but the original implementation seems use COLLECTOR_BATCH_SIZE=BLOCK_SIZE as granularity
-    int remainedSplats = splatIndexEnd - splatIndexStart;
-    
-    InterlockedMax(gs_maxBatches, numBatches);
-    GroupMemoryBarrierWithGroupSync();
-    
-    uint maxBatches = gs_maxBatches;
     
     // Initialize helper variables
     float T = 1.0f;
@@ -156,45 +156,48 @@ void CSRenderViewData(uint3 groupID : SV_GroupID,
     uint flattenLocalThreadId = threadIDInGroup.y * TILE_SIZE + threadIDInGroup.x; // block.thread_rank()
     
     // Iterate over batches until all done or range is complete
-    for (int i = 0; i < maxBatches; i++, remainedSplats -= COLLECTOR_BATCH_SIZE)
+    for (int i = 0; i < numBatches; i++)
     {
-        // TODO: in original implementation if all threads set done=true then quit rasterizing
-        
         // Collectively fetch per-Gaussian data from global to shared
         int progress = i * COLLECTOR_BATCH_SIZE + flattenLocalThreadId;
-        if (splatIndexStart + progress < splatIndexEnd)
+        bool groupSharedMemoryFilled = false;
+        uint tileConjSplatIdx = splatIndexStart + progress;
+        if (tileConjSplatIdx < splatIndexEnd && tileConjSplatIdx < NumTileConjugateSplat)
         {
-            uint coll_id = GetSortedSplatViewIndex(splatIndexStart + progress); // splat index
-            if (coll_id >= 0 && coll_id < SplatCount)
+            uint coll_id = GetSortedSplatViewIndex(tileConjSplatIdx); // splat index
+            if (coll_id < SplatCount)
             {
                 collected_id[flattenLocalThreadId] = coll_id;
-                collected_xy[flattenLocalThreadId] = TheSplatViewData[coll_id].mean_xy;
-                collected_conic_opacity[flattenLocalThreadId] = TheSplatViewData[coll_id].conic;
-            }
-            else
-            {
-                collected_id[flattenLocalThreadId] = -1; // Invalid sorting result, either range calc or sorting is wrong. This should not happen
-                collected_xy[flattenLocalThreadId] = float2(0, 0);
-                collected_conic_opacity[flattenLocalThreadId] = float4(0, 0, 0, 0);
-
+                
+                SplatViewData splatView = TheSplatViewData[coll_id];
+                collected_xy[flattenLocalThreadId] = splatView.mean_xy;
+                collected_conic_opacity[flattenLocalThreadId] = splatView.conic;
+                collected_rgbz[flattenLocalThreadId] = float4(splatView.diffuse_opacity.rgb, splatView.radii_clipz.y);
+                    
+                groupSharedMemoryFilled = true;
             }
         }
-        else
+        
+        if (!groupSharedMemoryFilled)
         {
-            collected_id[flattenLocalThreadId] = -1; // this is where the batch index is out of bounds
+            collected_id[flattenLocalThreadId] = -1; // this is where the batch index is out of bounds, invalid sorting result, etc etc
             collected_xy[flattenLocalThreadId] = float2(0, 0);
             collected_conic_opacity[flattenLocalThreadId] = float4(0, 0, 0, 0);
+            collected_rgbz[flattenLocalThreadId] = float4(0, 0, 0, 0);
         }
+
         
         // Make sure the collected_* arrays are valid
         GroupMemoryBarrierWithGroupSync(); // block.sync();
         
         // Doing each batch, iterate over collectged splats
-        for (int j = 0; !done && j < min(COLLECTOR_BATCH_SIZE, remainedSplats); j++)
+        //for (int j = 0; !done && j < min(COLLECTOR_BATCH_SIZE, remainedSplats); j++)
+        // It seems removing the test of "done" improves a lot of stability
+        const int actualRemainedSplats = min(COLLECTOR_BATCH_SIZE, remainedSplats);
+        for (int j = 0; j < actualRemainedSplats; j++)
         {
-            //contributor++;
             int splatIdx = collected_id[j];
-            if (splatIdx < 0)
+            if (splatIdx < 0) // only test for -1, as the SplatCount boundary check has been done in the collection phase
                 continue;
             
             float2 mean = collected_xy[j]; // somehow need to access the splat to get mean
@@ -212,14 +215,23 @@ void CSRenderViewData(uint3 groupID : SV_GroupID,
                 continue;
             }
             
-            topZ = max(topZ, TheSplatViewData[splatIdx].radii_clipz.y);
+            topZ = max(topZ, clamp(collected_rgbz[j].w, 0.0, 1.0));
             
             // Eq. (3) from 3D Gaussian splatting paper.
             // features: calculated splat color buffer from previous stage
-            C += TheSplatViewData[splatIdx].diffuse_opacity.rgb * alpha * T;
+            C += collected_rgbz[j].rgb * alpha * T;
             
             T = test_T;
         }
+        
+        remainedSplats -= COLLECTOR_BATCH_SIZE;
+        
+        // Make sure all the GPU threads are finished with using group shared memory, as in next loop group shared memories will be re-written
+        GroupMemoryBarrierWithGroupSync();
+        
+        // Adding this break seems improve stability
+        if (remainedSplats <= 0)
+            break;
     }
     
     // All threads that treat valid pixel write out their final
@@ -228,32 +240,49 @@ void CSRenderViewData(uint3 groupID : SV_GroupID,
     {
         float3 colourRGB = C;
 
-        /*
-        // Need to flip the output pixels vertical, just like original viewer
-        uint out_pix_id = W * (H - pix.y - 1) + pix.x;
+        uint2 texPixel = uint2(pix.x, H - 1 - pix.y); // this will output image on the top left corner, easier for composite to sample
+
         
-        
-        uint ir = ((uint) (colourRGB.r * 255.0));
-        uint ig = ((uint) (colourRGB.g * 255.0)) << 8;
-        uint ib = ((uint) (colourRGB.b * 255.0)) << 16;
-        uint ia = ((uint) ((1.0 - T) * 255.0)) << 24;
-        OutColourR8G8B8A8Buffer[out_pix_id] = ia | ir | ig | ib;
-        OutDepthF32Buffer[out_pix_id] = topZ;
-        */
- 
+        float alpha = (1.0 - T);
         // sRGB is a gamma-encoded color space (approx gamma 2.2). To convert from linear to sRGB, Unreal applies a gamma correction, roughly
         // sRGB = pow(linear, 1/2.2)
         // So usually Unreal expect an input of linear colour so that the gamma correction to sRGB goes as it expected.
         // Our stuff is always in sRGB.
         // But depending on which stage to inject the image, you will need to either apply the inverse gamma correction UnrealSRGBToLinear(c), or leave it alone
         // So if it's after tone mapping(ToneMapping, FXAA), you should remove the term
-        uint2 texPixel = uint2(pix.x, OutputTextureSize.y - 1 - pix.y);
-        OutputColourTexture[texPixel] = float4(UnrealSRGBToLinear(colourRGB), 1.0);
-
+        
+            
+        // Write to OutputDepthTexture based on clip space depth calculated in preprocess stage
+        // Trick depth with alpha value to "soften" the edge usually won't do better
+        if (DepthOutputThreshold.x > 0) // check if depth write is on
+        {
+            // do depth threshold
+            if (alpha > DepthOutputThreshold.w)
+            {
+                OutputColourTexture[texPixel] = float4(clamp(colourRGB / alpha, 0.0, 1.0), 1); // override alpha and boost edge colour with inversion of alpha
+                OutputDepthTexture[texPixel] = topZ;
+            }
+            else
+            {
+                OutputColourTexture[texPixel] = float4(0, 0, 0, 0);
+                OutputDepthTexture[texPixel] = 0;
+            }
+        }
+        else // no depth write, no need to do alpha cutout
+        {
+            // no depth threshold, or don't care
+            OutputColourTexture[texPixel] = float4(colourRGB, alpha); // with alpha
+            OutputDepthTexture[texPixel] = topZ;
+        }
+        
+    }
+    else
+    {
+        OutputColourTexture[pix] = float4(0, 0, 0, 0);
+        OutputDepthTexture[pix] = 0;
     }
 
 }
-#endif
 
 [numthreads(TILE_SIZE, TILE_SIZE, 1)]
 void CSRenderViewDataNoGroupSharedMemory(uint3 groupID : SV_GroupID,
@@ -305,7 +334,7 @@ void CSRenderViewDataNoGroupSharedMemory(uint3 groupID : SV_GroupID,
         if (tileConjSplatIdx >= NumTileConjugateSplat)
             break;
 
-        uint splatIdx = GetSortedSplatViewIndex(tileConjSplatIdx);
+        int splatIdx = GetSortedSplatViewIndex(tileConjSplatIdx);
 
         if (splatIdx >= SplatCount)
             continue;
@@ -350,13 +379,34 @@ void CSRenderViewDataNoGroupSharedMemory(uint3 groupID : SV_GroupID,
         // Our stuff is always in sRGB.
         // But depending on which stage to inject the image, you will need to either apply the inverse gamma correction UnrealSRGBToLinear(c), or leave it alone
         // So if it's after tone mapping(ToneMapping, FXAA), you should remove the term
-        OutputColourTexture[texPixel] = float4(UnrealSRGBToLinear(colourRGB), alpha); // with alpha
+        
             
         // Write to OutputDepthTexture based on clip space depth calculated in preprocess stage
         // Trick depth with alpha value to "soften" the edge usually won't do better
-        OutputDepthTexture[texPixel] = topZ;
+        if (DepthOutputThreshold.x > 0) // check if depth write is on
+        {
+            // do depth threshold
+            if (alpha > DepthOutputThreshold.w)
+            {
+                OutputColourTexture[texPixel] = float4(colourRGB / alpha, 1.0); // override alpha and boost edge colour with inversion of alpha
+                OutputDepthTexture[texPixel] = topZ;
+            }
+            else
+            {
+                OutputColourTexture[texPixel] = float4(0,0,0,0);
+                OutputDepthTexture[texPixel] = 0;
+            }
+        }
+        else // no depth write, no need to do alpha cutout
+        {
+            // no depth threshold, or don't care
+            OutputColourTexture[texPixel] = float4(colourRGB, alpha); // with alpha
+            OutputDepthTexture[texPixel] = topZ;
+        }
+        
     }
 }
+
 #else
 
 // Dummy

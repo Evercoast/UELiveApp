@@ -590,12 +590,15 @@ void FGaussianSplatTileRenderer::ReleaseSecondStageResources()
 
 void FGaussianSplatTileRenderer::ReserveSecondStageResources(uint32_t tileConjugateSplatCount, const FVector4& InScreenParam)
 {
-	// Second stage resources are dependent on those two parameters
-	if (m_maxTileConjugateSplat < tileConjugateSplatCount)
+	// Second stage resources are dependent on tileConjugateSplatCount, numTileX and numTileY
+	uint32_t numTileX = FMath::DivideAndRoundUp<uint32>(InScreenParam.X, TILE_SIZE);
+	uint32_t numTileY = FMath::DivideAndRoundUp<uint32>(InScreenParam.Y, TILE_SIZE);
+
+	if (m_maxTileConjugateSplat < tileConjugateSplatCount || numTileX != m_numTileX || numTileY != m_numTileY)
 	{
 		m_maxTileConjugateSplat = FMath::RoundUpToPowerOfTwo(tileConjugateSplatCount);
-		m_numTileX = FMath::DivideAndRoundUp<uint32>(InScreenParam.X, TILE_SIZE);
-		m_numTileY = FMath::DivideAndRoundUp<uint32>(InScreenParam.Y, TILE_SIZE);
+		m_numTileX = numTileX;
+		m_numTileY = numTileY;
 
 		// Release buffers
 		m_tileConjugateSplatKeys[0].SafeRelease();
@@ -1115,7 +1118,7 @@ uint32_t FGaussianSplatTileRenderer::RunFirstStagePipeline_RenderThread(FRHIComm
 	return numTileConjugateSplat;
 }
 
-bool FGaussianSplatTileRenderer::RunSecondStagePipeline_RenderThread(FRHICommandListImmediate& RHICmdList, uint32_t numSplats, uint32_t numTileConjugateSplat, const FVector4& InScreenParam)
+bool FGaussianSplatTileRenderer::RunSecondStagePipeline_RenderThread(FRHICommandListImmediate& RHICmdList, uint32_t numSplats, uint32_t numTileConjugateSplat, const FVector4& InScreenParam, const FVector4& DepthOutputThreshold)
 {
 
 
@@ -1252,6 +1255,7 @@ bool FGaussianSplatTileRenderer::RunSecondStagePipeline_RenderThread(FRHICommand
 		ShaderParameters.NumTileConjugateSplat = numTileConjugateSplat;
 		ShaderParameters.VecScreenParams = FVector4f(InScreenParam);
 		ShaderParameters.OutputTextureSize = textureSize;
+		ShaderParameters.DepthOutputThreshold = FVector4f(DepthOutputThreshold);
 
 		ShaderParameters.TheSplatViewData = m_splatViewSRV;
 		ShaderParameters.TileConjugateSplatValuesSorted = sortedValueListSRV;
@@ -1285,7 +1289,7 @@ bool FGaussianSplatTileRenderer::RunSecondStagePipeline_RenderThread(FRHICommand
 }
 
 bool FGaussianSplatTileRenderer::RunPipeline_RenderThread(FRHICommandListImmediate& RHICmdList, const FMatrix& InObjectToWorld, const FMatrix& InView, const FMatrix& InProj, const FVector& InCameraPositionWS, const FVector4& InScreenParam, float InCov2DSqrtKernelSize,
-	bool showSH0, bool showSH1, bool showSH2, bool showSH3, std::shared_ptr<const EvercoastGaussianSplatCSResult> InGaussianData)
+	bool showSH0, bool showSH1, bool showSH2, bool showSH3, const FVector4& InDepthOutputThreshold, std::shared_ptr<const EvercoastGaussianSplatCSResult> InGaussianData)
 {
 	std::lock_guard<std::recursive_mutex> guard(m_accessRHIMutex);
 
@@ -1317,12 +1321,13 @@ bool FGaussianSplatTileRenderer::RunPipeline_RenderThread(FRHICommandListImmedia
 	uint32_t numTileConjugateSplat = RunFirstStagePipeline_RenderThread(RHICmdList, InObjectToWorld, InView, InProj, InCameraPositionWS, numSplats, InScreenParam, InCov2DSqrtKernelSize, showSH0, showSH1, showSH2, showSH3);
 
 	ReserveSecondStageResources(numTileConjugateSplat, currScreenParam);
-	return RunSecondStagePipeline_RenderThread(RHICmdList, numSplats, numTileConjugateSplat, currScreenParam);
+	return RunSecondStagePipeline_RenderThread(RHICmdList, numSplats, numTileConjugateSplat, currScreenParam, InDepthOutputThreshold);
 }
 
 void FGaussianSplatTileRenderer::SaveInput(const FMatrix& InObjectToWorld, const FMatrix& InView, const FMatrix& InProj, const FVector& InCameraPositionWS,
 	const FVector4& InScreenParam, float InCov2DSqrtKernelSize,
 	bool InShowSH0, bool InShowSH1, bool InShowSH2, bool InShowSH3,
+	const FVector4& InDepthOutputThreshold,
 	std::shared_ptr<const EvercoastGaussianSplatCSResult> InGaussianData)
 {
 	std::lock_guard<std::recursive_mutex> guard(m_accessRHIMutex);
@@ -1332,7 +1337,17 @@ void FGaussianSplatTileRenderer::SaveInput(const FMatrix& InObjectToWorld, const
 	const uint32 CurrentThreadId = FPlatformTLS::GetCurrentThreadId();
 
 	SavedEncodedGaussianSplats = InGaussianData;
-	FIntVector2 expectedOutputRenderTargetSize = FIntVector2(FMath::RoundUpToPowerOfTwo(InScreenParam.X), FMath::RoundUpToPowerOfTwo(InScreenParam.Y));
+	FIntPoint expectedOutputRenderTargetSize = FIntPoint(FMath::RoundUpToPowerOfTwo(InScreenParam.X), FMath::RoundUpToPowerOfTwo(InScreenParam.Y));
+	if (m_outputColourRenderTarget)
+	{
+		FIntPoint existingOutputRenderTargetSize = m_outputColourRenderTarget->GetDesc().Extent;
+		if (existingOutputRenderTargetSize != expectedOutputRenderTargetSize)
+		{
+			expectedOutputRenderTargetSize = existingOutputRenderTargetSize;
+		}
+	}
+	
+	
 	SavedOutputRenderTargetUVScale = FVector2f(InScreenParam.X / expectedOutputRenderTargetSize.X,
 		InScreenParam.Y / expectedOutputRenderTargetSize.Y);
 
@@ -1346,13 +1361,13 @@ void FGaussianSplatTileRenderer::SaveInput(const FMatrix& InObjectToWorld, const
 	SavedShowSH1 = InShowSH1;
 	SavedShowSH2 = InShowSH2;
 	SavedShowSH3 = InShowSH3;
-
+	SavedDepthOutputThreshold = InDepthOutputThreshold;
 
 }
 
 bool FGaussianSplatTileRenderer::RunPipelineWithLastSavedInput_RenderThread(FRHICommandListImmediate& RHICmdList)
 {
-	return RunPipeline_RenderThread(RHICmdList, SavedObjectToWorld, SavedView, SavedProj, SavedCameraPositionWS, SavedScreenParam, SavedCov2DSqrtKernelSize, SavedShowSH0, SavedShowSH1, SavedShowSH2, SavedShowSH3, SavedEncodedGaussianSplats);
+	return RunPipeline_RenderThread(RHICmdList, SavedObjectToWorld, SavedView, SavedProj, SavedCameraPositionWS, SavedScreenParam, SavedCov2DSqrtKernelSize, SavedShowSH0, SavedShowSH1, SavedShowSH2, SavedShowSH3, SavedDepthOutputThreshold, SavedEncodedGaussianSplats);
 }
 
 FTextureRHIRef FGaussianSplatTileRenderer::GetOutputColourRenderTarget() const
