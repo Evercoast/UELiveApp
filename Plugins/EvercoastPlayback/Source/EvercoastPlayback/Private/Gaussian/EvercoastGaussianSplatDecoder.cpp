@@ -229,7 +229,6 @@ static std::shared_ptr<EvercoastGaussianSplatCSResult> fillAndPadDataFromRawSPZ(
 		padded4BytesAlignedSHCoeffs, padded4BytesAlignedSHCoeffsSize);
 }
 
-#if PLATFORM_WINDOWS
 bool EvercoastGaussianSplatDecoder::DecodeMemoryStreamPLY(const uint8_t* stream, size_t stream_size, double timestamp, int64_t frameIndex, GenericDecodeOption* option)
 {
 	spz::UnpackOptions unpackOption;
@@ -294,11 +293,9 @@ bool EvercoastGaussianSplatDecoder::DecodeMemoryStreamECSPZ(const uint8_t* strea
 
 	return true;
 }
-#endif
 
 bool EvercoastGaussianSplatDecoder::DecodeMemoryStream(const uint8_t* stream, size_t stream_size, double timestamp, int64_t frameIndex, GenericDecodeOption* option)
 {
-#if PLATFORM_WINDOWS
 
 	EvercoastGaussianSplatDecodeOption* decodingOption = (EvercoastGaussianSplatDecodeOption*)option;
 	if (decodingOption && decodingOption->bIsFromPLY)
@@ -309,10 +306,4 @@ bool EvercoastGaussianSplatDecoder::DecodeMemoryStream(const uint8_t* stream, si
 	{
 		return DecodeMemoryStreamECSPZ(stream, stream_size, timestamp, frameIndex, option);
 	}
-
-#else
-	UE_LOG(EvercoastVoxelDecoderLog, Error, TEXT("Gaussian splat ecz decoding only supported on Windows"));
-	return false;
-#endif
-
 }

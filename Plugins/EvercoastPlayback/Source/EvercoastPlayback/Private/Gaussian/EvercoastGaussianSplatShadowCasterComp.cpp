@@ -33,16 +33,6 @@ void UEvercoastGaussianSplatShadowCasterComp::SetShadowDecimate(float InSplatDec
     }
 }
 
-void UEvercoastGaussianSplatShadowCasterComp::SetShadowBlobScale(float InBlobScale)
-{
-    ShadowBlobScale = InBlobScale;
-
-    if (SceneProxy)
-    {
-        ((FEvercoastGaussianSplatShadowingSceneProxy*)SceneProxy)->SetShadowBlobScale(ShadowBlobScale);
-    }
-}
-
 void UEvercoastGaussianSplatShadowCasterComp::SetRendererType(EGaussianSplatRendererType newType)
 {
     // always use quad renderer for shadow 
@@ -66,7 +56,7 @@ FPrimitiveSceneProxy* UEvercoastGaussianSplatShadowCasterComp::CreateSceneProxy(
         m_materialInstance = GetNewMaterialInstanceDynamic();
 
         FEvercoastGaussianSplatShadowingSceneProxy* newSceneProxy = new FEvercoastGaussianSplatShadowingSceneProxy(this, m_materialInstance,
-            bReconstructOnTickOnly, ShadowDecimate, ShadowBlobScale);
+            bReconstructOnTickOnly, ShadowDecimate, SplatExtraScale);
 
         ENQUEUE_RENDER_COMMAND(FEvercoastGaussianDataUpdate)(
             [sceneProxy = newSceneProxy, encodedSplatData = GetRetainedEncodedSplatData()](FRHICommandListImmediate& RHICmdList)

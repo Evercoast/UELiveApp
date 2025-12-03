@@ -27,7 +27,8 @@ UENUM(BlueprintType) // Makes the enum available to Blueprints
 enum class EGaussianSplatRendererType : uint8 // Use enum class for strong typing and specify underlying type
 {
     QUAD_RENDERER UMETA(DisplayName = "Quad Renderer(Fast)"),
-    TILE_RENDERER UMETA(DisplayName = "Tile Renderer(Accurate)"),
+    TILE_RENDERER UMETA(DisplayName = "Tile Renderer(Best Accuracy)"),
+    OFFSCREEN_QUAD_RENDERER UMETA(DisplayName = "Offscreen Quad Renderer(Good Accuracy & Fast)"),
 };
 
 UENUM(BlueprintType)
@@ -54,12 +55,12 @@ public:
     UMaterialInterface* GaussianSplatMaterial;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetRendererType, Category = "Rendering")
-    EGaussianSplatRendererType rendererType = EGaussianSplatRendererType::TILE_RENDERER;
+    EGaussianSplatRendererType rendererType = EGaussianSplatRendererType::OFFSCREEN_QUAD_RENDERER;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetReconstructOnTickOnly, Category = "Rendering")
     bool bReconstructOnTickOnly;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetSplatExtraScale, meta = (EditCondition = "rendererType == EGaussianSplatRendererType::QUAD_RENDERER", EditConditionHides, UIMin = "0.0", UIMax = "2.0"), Category = "Rendering")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetSplatExtraScale, meta = (EditCondition = "(rendererType == EGaussianSplatRendererType::QUAD_RENDERER || rendererType == EGaussianSplatRendererType::OFFSCREEN_QUAD_RENDERER)", EditConditionHides, UIMin = "0.0", UIMax = "2.0"), Category = "Rendering")
     float SplatExtraScale = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetCov2DSqrtKernelSize, meta = (UIMin = "0.0", UIMax = "1.0"), Category = "Rendering")
@@ -77,13 +78,13 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetShowSphericalHarmonics3, Category = "Rendering")
     bool bShowSphericalHarmonics3Colour = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetTileRendererHookStage, meta = (EditCondition = "rendererType == EGaussianSplatRendererType::TILE_RENDERER", EditConditionHides), Category = "Rendering")
-    EGaussianSplatHookStage TileRendererHookStage = EGaussianSplatHookStage::OVERLAY;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetTileRendererHookStage, meta = (EditCondition = "rendererType == EGaussianSplatRendererType::TILE_RENDERER || rendererType == EGaussianSplatRendererType::OFFSCREEN_QUAD_RENDERER", EditConditionHides), Category = "Rendering")
+    EGaussianSplatHookStage TileRendererHookStage = EGaussianSplatHookStage::POST_OPAQUE;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetEnableTileRendererDepthWrite, meta = (EditCondition = "rendererType == EGaussianSplatRendererType::TILE_RENDERER", EditConditionHides), Category = "Rendering")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetEnableTileRendererDepthWrite, meta = (EditCondition = "rendererType == EGaussianSplatRendererType::TILE_RENDERER || rendererType == EGaussianSplatRendererType::OFFSCREEN_QUAD_RENDERER", EditConditionHides), Category = "Rendering")
     bool bEnableTileRendererDepthWrite = true;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetTileRendererAlphaCutoutThreshold, meta = (UIMin = "0.0", UIMax = "1.0", EditCondition = "rendererType == EGaussianSplatRendererType::TILE_RENDERER && bEnableTileRendererDepthWrite", EditConditionHides), Category = "Rendering")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetTileRendererAlphaCutoutThreshold, meta = (UIMin = "0.0", UIMax = "1.0", EditCondition = "(rendererType == EGaussianSplatRendererType::TILE_RENDERER || rendererType == EGaussianSplatRendererType::OFFSCREEN_QUAD_RENDERER) && bEnableTileRendererDepthWrite", EditConditionHides), Category = "Rendering")
     float TileRendererAlphaCutoutThreshold = 0.667f;
 
     // ~ Begin UPrimitiveComponent Interface.

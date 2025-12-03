@@ -1,11 +1,10 @@
-#include "Gaussian/GaussianSplatTileRendererSceneViewExtension.h"
+#include "Gaussian/GaussianSplatOffscreenRendererSceneViewExtension.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "EngineModule.h"
 #include "PixelShaderUtils.h"
 #include "Gaussian/GaussianSplatTileRenderer.h"
+#include "Gaussian/GaussianSplatOffscreenQuadRenderer.h"
 #include "SceneTextureParameters.h"
-
-#if PLATFORM_WINDOWS
 
 IMPLEMENT_GLOBAL_SHADER(FGaussianSplatCompositeColourPixelShader, "/EvercoastShaders/GaussianSplatComposite.usf", "CompositeColourPostOpaquePS", SF_Pixel);
 IMPLEMENT_GLOBAL_SHADER(FGaussianSplatCompositeColourOverlayPixelShader, "/EvercoastShaders/GaussianSplatComposite.usf", "CompositeColourOverlayPS", SF_Pixel);
@@ -15,27 +14,42 @@ IMPLEMENT_GLOBAL_SHADER(FGaussianSplatCompositeDepthPixelShader, "/EvercoastShad
 IMPLEMENT_GLOBAL_SHADER(FGaussianSplatEngineGBufferModifierPixelShader, "/EvercoastShaders/GaussianSplatComposite.usf", "GBufferModifierPS", SF_Pixel);
 
 
-FGaussianSplatTileRendererSceneViewExtension::TRegisteredSplatImage::TRegisteredSplatImage(FTextureRHIRef InColour, FTextureRHIRef InDepth, const FVector2f& InUVScale, const FVector& WorldPos, bool bInToCompositeDepth, uint8 compositionStage, int frameCount) :
-	Colour(InColour), Depth(InDepth), UVScale(InUVScale), WorldPosition(WorldPos), bToCompositeDepth(bInToCompositeDepth), CompositionStage(compositionStage), FrameCount(frameCount)
+FGaussianSplatOffscreenRendererSceneViewExtension::TRegisteredSplatImage::TRegisteredSplatImage(FTextureRHIRef InColour, FTextureRHIRef InDepth, const FVector2f& InUVScale, const FVector& WorldPos, bool bInToCompositeDepth, uint8 compositionStage) :
+	Colour(InColour), Depth(InDepth), UVScale(InUVScale), WorldPosition(WorldPos), bToCompositeDepth(bInToCompositeDepth), CompositionStage(compositionStage)
 {
 }
 
-FGaussianSplatTileRendererSceneViewExtension::TRegisteredSplatImage::~TRegisteredSplatImage()
+FGaussianSplatOffscreenRendererSceneViewExtension::TRegisteredSplatImage::~TRegisteredSplatImage()
 {
 }
 
 
-FGaussianSplatTileRendererSceneViewExtension::TRegisteredTileRenderer::TRegisteredTileRenderer(TSharedPtr<FGaussianSplatTileRenderer> InRenderer, const FVector& InWorldPos, bool bInToCompositeDepth, uint8 compositionStage, int InFrameCount) :
+#if PLATFORM_WINDOWS
+FGaussianSplatOffscreenRendererSceneViewExtension::TRegisteredTileRenderer::TRegisteredTileRenderer(TSharedPtr<FGaussianSplatTileRenderer> InRenderer, const FVector& InWorldPos, bool bInToCompositeDepth, uint8 compositionStage) :
 	TileRenderer(InRenderer),
 	WorldPos(InWorldPos),
 	bToCompositeDepth(bInToCompositeDepth),
-	CompositionStage(compositionStage),
-	FrameCount(InFrameCount)
+	CompositionStage(compositionStage)
 {
 
 }
 
-FGaussianSplatTileRendererSceneViewExtension::TRegisteredTileRenderer::~TRegisteredTileRenderer()
+FGaussianSplatOffscreenRendererSceneViewExtension::TRegisteredTileRenderer::~TRegisteredTileRenderer()
+{
+
+}
+#endif
+
+FGaussianSplatOffscreenRendererSceneViewExtension::TRegisteredOffscreenQuadRenderer::TRegisteredOffscreenQuadRenderer(TSharedPtr<FGaussianSplatOffscreenQuadRenderer> InRenderer, const FVector& InWorldPos, bool bInToCompositeDepth, uint8 compositionStage) :
+	QuadRenderer(InRenderer),
+	WorldPos(InWorldPos),
+	bToCompositeDepth(bInToCompositeDepth),
+	CompositionStage(compositionStage)
+{
+
+}
+
+FGaussianSplatOffscreenRendererSceneViewExtension::TRegisteredOffscreenQuadRenderer::~TRegisteredOffscreenQuadRenderer()
 {
 
 }
@@ -45,25 +59,25 @@ namespace
 	TAutoConsoleVariable<int32> CVarShaderOn(
 		TEXT("r.EvercoastGaussianSplatTileRendererEnable"),
 		1,
-		TEXT("Enable FGaussianSplatTileRendererSceneViewExtension Colour Output\n")
+		TEXT("Enable FGaussianSplatOffscreenRendererSceneViewExtension Colour Output\n")
 		TEXT(" 0: OFF;")
 		TEXT(" 1: ON."),
 		ECVF_RenderThreadSafe);
 }
 
 
-FGaussianSplatTileRendererSceneViewExtension::FGaussianSplatTileRendererSceneViewExtension(const FAutoRegister& AutoRegister) : FSceneViewExtensionBase(AutoRegister)
+FGaussianSplatOffscreenRendererSceneViewExtension::FGaussianSplatOffscreenRendererSceneViewExtension(const FAutoRegister& AutoRegister) : FSceneViewExtensionBase(AutoRegister)
 {
 }
 
 
-void FGaussianSplatTileRendererSceneViewExtension::Initialize()
+void FGaussianSplatOffscreenRendererSceneViewExtension::Initialize()
 {
-	m_postOpaqueRenderHandle = GetRendererModule().RegisterPostOpaqueRenderDelegate(FPostOpaqueRenderDelegate::CreateRaw(this, &FGaussianSplatTileRendererSceneViewExtension::OnPostOpaqueRender));
-	m_overlayRenderHandle = GetRendererModule().RegisterOverlayRenderDelegate(FPostOpaqueRenderDelegate::CreateRaw(this, &FGaussianSplatTileRendererSceneViewExtension::OnOverlayRender));
+	m_postOpaqueRenderHandle = GetRendererModule().RegisterPostOpaqueRenderDelegate(FPostOpaqueRenderDelegate::CreateRaw(this, &FGaussianSplatOffscreenRendererSceneViewExtension::OnPostOpaqueRender));
+	m_overlayRenderHandle = GetRendererModule().RegisterOverlayRenderDelegate(FPostOpaqueRenderDelegate::CreateRaw(this, &FGaussianSplatOffscreenRendererSceneViewExtension::OnOverlayRender));
 }
 
-void FGaussianSplatTileRendererSceneViewExtension::Deinitialize()
+void FGaussianSplatOffscreenRendererSceneViewExtension::Deinitialize()
 {
 	if (m_postOpaqueRenderHandle.IsValid())
 	{
@@ -75,13 +89,14 @@ void FGaussianSplatTileRendererSceneViewExtension::Deinitialize()
 	}
 }
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 5
-void FGaussianSplatTileRendererSceneViewExtension::SubscribeToPostProcessingPass(EPostProcessingPass PassId, const FSceneView& InView, FAfterPassCallbackDelegateArray& InOutPassCallbacks, bool bIsPassEnabled)
+void FGaussianSplatOffscreenRendererSceneViewExtension::SubscribeToPostProcessingPass(EPostProcessingPass PassId, const FSceneView& InView, FAfterPassCallbackDelegateArray& InOutPassCallbacks, bool bIsPassEnabled)
 #else
-void FGaussianSplatTileRendererSceneViewExtension::SubscribeToPostProcessingPass(EPostProcessingPass PassId, FAfterPassCallbackDelegateArray& InOutPassCallbacks, bool bIsPassEnabled)
+void FGaussianSplatOffscreenRendererSceneViewExtension::SubscribeToPostProcessingPass(EPostProcessingPass PassId, FAfterPassCallbackDelegateArray& InOutPassCallbacks, bool bIsPassEnabled)
 #endif
 {
 	if (PassId == EPostProcessingPass::Tonemap)
 	{
+		std::lock_guard<std::recursive_mutex> guard(m_imageMutex);
 		bool needRegister = false;
 		for (int i = 0; i < m_registeredSplatImageList.Num(); ++i)
 		{
@@ -94,42 +109,116 @@ void FGaussianSplatTileRendererSceneViewExtension::SubscribeToPostProcessingPass
 		}
 		
 		if (needRegister)
-			InOutPassCallbacks.Add(FAfterPassCallbackDelegate::CreateRaw(this, &FGaussianSplatTileRendererSceneViewExtension::OnPostProcessingTonemap));
+			InOutPassCallbacks.Add(FAfterPassCallbackDelegate::CreateRaw(this, &FGaussianSplatOffscreenRendererSceneViewExtension::OnPostProcessingTonemap));
 	}
 }
 
 
-void FGaussianSplatTileRendererSceneViewExtension::RegisterSplatImage(FTextureRHIRef rendererImage, FTextureRHIRef rendererDepthImage, const FVector2f& uvScale, const FVector& WorldPos, bool toCompositeDepth, uint8 compositionStage, int frameCount)
+void FGaussianSplatOffscreenRendererSceneViewExtension::RegisterSplatImage(FTextureRHIRef rendererImage, FTextureRHIRef rendererDepthImage, const FVector2f& uvScale, const FVector& WorldPos, bool toCompositeDepth, uint8 compositionStage)
 {
 	std::lock_guard<std::recursive_mutex> guard(m_imageMutex);
 	m_registeredSplatImageList.Add(
-		MakeShared<TRegisteredSplatImage>(rendererImage, rendererDepthImage, uvScale, WorldPos, toCompositeDepth, compositionStage, frameCount)
+		MakeShared<TRegisteredSplatImage>(rendererImage, rendererDepthImage, uvScale, WorldPos, toCompositeDepth, compositionStage)
 	);
 }
 
 
-void FGaussianSplatTileRendererSceneViewExtension::ClearRegisteredSplatImages()
+void FGaussianSplatOffscreenRendererSceneViewExtension::ClearRegisteredSplatImages()
 {
 	std::lock_guard<std::recursive_mutex> guard(m_imageMutex);
 	m_registeredSplatImageList.Empty();
 }
 
-void FGaussianSplatTileRendererSceneViewExtension::RegisterTileRenderer(TSharedPtr<FGaussianSplatTileRenderer> pTileRenderer, const FVector& WorldPos, bool toCompositeDepth, uint8 compositionStage, int frameCount)
+#if PLATFORM_WINDOWS
+void FGaussianSplatOffscreenRendererSceneViewExtension::RegisterTileRenderer(TSharedPtr<FGaussianSplatTileRenderer> pTileRenderer, const FVector& WorldPos, bool toCompositeDepth, uint8 compositionStage)
 {
 	std::lock_guard<std::recursive_mutex> guard(m_tileRendererMutex);
 
 	m_registeredTileRenderer.Add(
-		MakeShared<TRegisteredTileRenderer>(pTileRenderer, WorldPos, toCompositeDepth, compositionStage, frameCount)
+		MakeShared<TRegisteredTileRenderer>(pTileRenderer, WorldPos, toCompositeDepth, compositionStage)
 	);
 }
 
-void FGaussianSplatTileRendererSceneViewExtension::ClearRegisteredTileRenderer()
+void FGaussianSplatOffscreenRendererSceneViewExtension::ClearRegisteredTileRenderer()
 {
 	std::lock_guard<std::recursive_mutex> guard(m_tileRendererMutex);
 	m_registeredTileRenderer.Empty();
 }
 
-void FGaussianSplatTileRendererSceneViewExtension::PostRenderBasePassDeferred_RenderThread(FRDGBuilder& GraphBuilder, FSceneView& SceneView, const FRenderTargetBindingSlots& RenderTargets, TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures)
+#endif
+
+void FGaussianSplatOffscreenRendererSceneViewExtension::RegisterOffscreenQuadRenderer(TSharedPtr<FGaussianSplatOffscreenQuadRenderer> pQuadRenderer, const FVector& WorldPos, bool toCompositeDepth, uint8 compositionStage)
+{
+	std::lock_guard<std::recursive_mutex> guard(m_offscreenQuadRendererMutex);
+
+	m_registeredOffscreenQuadRenderer.Add(
+		MakeShared<TRegisteredOffscreenQuadRenderer>(pQuadRenderer, WorldPos, toCompositeDepth, compositionStage)
+	);
+}
+
+void FGaussianSplatOffscreenRendererSceneViewExtension::ClearRegisteredOffscreenQuadRenderer()
+{
+	std::lock_guard<std::recursive_mutex> guard(m_offscreenQuadRendererMutex);
+	m_registeredOffscreenQuadRenderer.Empty();
+}
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 3	
+void FGaussianSplatOffscreenRendererSceneViewExtension::PostRenderBasePassMobile_RenderThread(FRHICommandList& RHICmdList, FSceneView& SceneView)
+#else
+void FGaussianSplatOffscreenRendererSceneViewExtension::PostRenderBasePassMobile_RenderThread(FRHICommandListImmediate& RHICmdList, FSceneView& SceneView)
+#endif
+{
+	int renderMode = CVarShaderOn.GetValueOnRenderThread();
+	if (renderMode == 0)
+	{
+		return;
+	}
+
+	check(IsInRenderingThread());
+	// Only works in VMI_Lit and VMI_Unlit mode
+	EViewModeIndex ViewMode = SceneView.Family->ViewMode;
+	if (ViewMode != VMI_Lit && ViewMode != VMI_Unlit && ViewMode != VMI_VisualizeBuffer)
+	{
+		ClearRegisteredSplatImages();
+		ClearRegisteredOffscreenQuadRenderer();
+		return;
+	}
+
+	// In 5.4 5.5
+	// Use this RHICmdList to call UGaussianSplatTileRenderer::RunPipeline_RenderThread() get the image result without delay
+	{
+		
+		UE_LOG(LogTemp, Log, TEXT("PostRenderBasePassMobile_RenderThread before clear registered splat images"));
+		ClearRegisteredSplatImages();
+
+		{
+			// For all off screen quad renderers
+			std::lock_guard<std::recursive_mutex> guard2(m_offscreenQuadRendererMutex);
+			for (int i = 0; i < m_registeredOffscreenQuadRenderer.Num(); ++i)
+			{
+				TSharedPtr<TRegisteredOffscreenQuadRenderer> registeredQuadRenderer = m_registeredOffscreenQuadRenderer[i];
+
+				TSharedPtr<FGaussianSplatOffscreenQuadRenderer> quadRenderer = registeredQuadRenderer->QuadRenderer;
+
+				// If the image was produced. Out of view or zero numbered splats will return false
+				if (quadRenderer->RunPipelineWithLastSavedInput_RenderThread(RHICmdList.GetAsImmediate()))
+				{
+
+					// register image for code just below
+					RegisterSplatImage(quadRenderer->GetOutputColourRenderTarget(), quadRenderer->GetOutputDepthRenderTarget(), quadRenderer->GetSavedOutputRenderTargetUVScale(),
+						registeredQuadRenderer->WorldPos, registeredQuadRenderer->bToCompositeDepth, registeredQuadRenderer->CompositionStage);
+				}
+			}
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("PostRenderBasePassMobile_RenderThread after run splat pipeline"));
+		ClearRegisteredOffscreenQuadRenderer();
+
+		UE_LOG(LogTemp, Log, TEXT("PostRenderBasePassMobile_RenderThread after clear renderers"));
+	}
+}
+
+void FGaussianSplatOffscreenRendererSceneViewExtension::PostRenderBasePassDeferred_RenderThread(FRDGBuilder& GraphBuilder, FSceneView& SceneView, const FRenderTargetBindingSlots& RenderTargets, TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures)
 {
 	int renderMode = CVarShaderOn.GetValueOnRenderThread();
 	if (renderMode == 0)
@@ -144,35 +233,65 @@ void FGaussianSplatTileRendererSceneViewExtension::PostRenderBasePassDeferred_Re
 	if (ViewMode != VMI_Lit && ViewMode != VMI_Unlit && ViewMode != VMI_VisualizeBuffer)
 	{
 		ClearRegisteredSplatImages();
+#if PLATFORM_WINDOWS
 		ClearRegisteredTileRenderer();
+#endif
+		ClearRegisteredOffscreenQuadRenderer();
 		return;
 	}
 
 	// In 5.4 5.5
 	// Use this RHICmdList to call UGaussianSplatTileRenderer::RunPipeline_RenderThread() get the image result without delay
 	{
-		std::lock_guard<std::recursive_mutex> guard(m_tileRendererMutex);
+		
 
 		ClearRegisteredSplatImages();
 
 		FRHICommandListImmediate& RHICmdList = GraphBuilder.RHICmdList;
-		for (int i = 0; i < m_registeredTileRenderer.Num(); ++i)
+#if PLATFORM_WINDOWS
 		{
-			TSharedPtr<TRegisteredTileRenderer> registeredTileRenderer = m_registeredTileRenderer[i];
-
-			TSharedPtr<FGaussianSplatTileRenderer> tileRenderer = registeredTileRenderer->TileRenderer;
-
-			// If the image was produced. Out of view or zero numbered splats will return false
-			if (tileRenderer->RunPipelineWithLastSavedInput_RenderThread(RHICmdList))
+			std::lock_guard<std::recursive_mutex> guard(m_tileRendererMutex);
+			// For all tile renderers
+			for (int i = 0; i < m_registeredTileRenderer.Num(); ++i)
 			{
+				TSharedPtr<TRegisteredTileRenderer> registeredTileRenderer = m_registeredTileRenderer[i];
 
-				// register image for code just below
-				RegisterSplatImage(tileRenderer->GetOutputColourRenderTarget(), tileRenderer->GetOutputDepthRenderTarget(), tileRenderer->GetSavedOutputRenderTargetUVScale(),
-					registeredTileRenderer->WorldPos, registeredTileRenderer->bToCompositeDepth, registeredTileRenderer->CompositionStage, tileRenderer->GetOutputFrameCounter());
+				TSharedPtr<FGaussianSplatTileRenderer> tileRenderer = registeredTileRenderer->TileRenderer;
+
+				// If the image was produced. Out of view or zero numbered splats will return false
+				if (tileRenderer->RunPipelineWithLastSavedInput_RenderThread(RHICmdList))
+				{
+
+					// register image for code just below
+					RegisterSplatImage(tileRenderer->GetOutputColourRenderTarget(), tileRenderer->GetOutputDepthRenderTarget(), tileRenderer->GetSavedOutputRenderTargetUVScale(),
+						registeredTileRenderer->WorldPos, registeredTileRenderer->bToCompositeDepth, registeredTileRenderer->CompositionStage);
+				}
 			}
 		}
+#endif
+		{
+			// For all off screen quad renderers
+			std::lock_guard<std::recursive_mutex> guard2(m_offscreenQuadRendererMutex);
+			for (int i = 0; i < m_registeredOffscreenQuadRenderer.Num(); ++i)
+			{
+				TSharedPtr<TRegisteredOffscreenQuadRenderer> registeredQuadRenderer = m_registeredOffscreenQuadRenderer[i];
 
+				TSharedPtr<FGaussianSplatOffscreenQuadRenderer> quadRenderer = registeredQuadRenderer->QuadRenderer;
+
+				// If the image was produced. Out of view or zero numbered splats will return false
+				if (quadRenderer->RunPipelineWithLastSavedInput_RenderThread(RHICmdList))
+				{
+
+					// register image for code just below
+					RegisterSplatImage(quadRenderer->GetOutputColourRenderTarget(), quadRenderer->GetOutputDepthRenderTarget(), quadRenderer->GetSavedOutputRenderTargetUVScale(),
+						registeredQuadRenderer->WorldPos, registeredQuadRenderer->bToCompositeDepth, registeredQuadRenderer->CompositionStage);
+				}
+			}
+		}
+#if PLATFORM_WINDOWS
 		ClearRegisteredTileRenderer();
+#endif
+		ClearRegisteredOffscreenQuadRenderer();
 	}
 
 
@@ -323,7 +442,7 @@ void FGaussianSplatTileRendererSceneViewExtension::PostRenderBasePassDeferred_Re
 
 
 
-void FGaussianSplatTileRendererSceneViewExtension::OnPostOpaqueRender(FPostOpaqueRenderParameters& Parameters)
+void FGaussianSplatOffscreenRendererSceneViewExtension::OnPostOpaqueRender(FPostOpaqueRenderParameters& Parameters)
 {
 	int renderMode = CVarShaderOn.GetValueOnRenderThread();
 	if (renderMode == 0)
@@ -346,6 +465,7 @@ void FGaussianSplatTileRendererSceneViewExtension::OnPostOpaqueRender(FPostOpaqu
 
 	RDG_EVENT_SCOPE(GraphBuilder, "Gaussian Splats PostOpaque Colour Composite Event");
 	{
+		std::lock_guard<std::recursive_mutex> guard(m_imageMutex);
 		// First sort the registered array by view Z to slightly improve "splats over splats" occlusion
 		const FMatrix& ViewMatrix = Parameters.ViewMatrix;
 
@@ -360,8 +480,6 @@ void FGaussianSplatTileRendererSceneViewExtension::OnPostOpaqueRender(FPostOpaqu
 
 		// Accesspoint to our Shaders
 		FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(FeatureLevel);
-
-		std::lock_guard<std::recursive_mutex> guard(m_imageMutex);
 
 		// Get the input sizes (do note that viewport visible area might not be the full extent of the SceneColor texture
 		// https://docs.unrealengine.com/5.1/en-US/screen-percentage-with-temporal-upscale-in-unreal-engine/
@@ -516,7 +634,7 @@ void FGaussianSplatTileRendererSceneViewExtension::OnPostOpaqueRender(FPostOpaqu
 	}
 }
 
-void FGaussianSplatTileRendererSceneViewExtension::OnOverlayRender(FPostOpaqueRenderParameters& Parameters)
+void FGaussianSplatOffscreenRendererSceneViewExtension::OnOverlayRender(FPostOpaqueRenderParameters& Parameters)
 {
 	int renderMode = CVarShaderOn.GetValueOnRenderThread();
 	if (renderMode == 0)
@@ -531,6 +649,7 @@ void FGaussianSplatTileRendererSceneViewExtension::OnOverlayRender(FPostOpaqueRe
 
 	RDG_EVENT_SCOPE(GraphBuilder, "Gaussian Splats Overlay Colour Composite Event");
 	{
+		std::lock_guard<std::recursive_mutex> guard(m_imageMutex);
 		// First sort the registered array by view Z to slightly improve "splats over splats" occlusion
 		const FMatrix& ViewMatrix = Parameters.ViewMatrix;
 
@@ -546,7 +665,6 @@ void FGaussianSplatTileRendererSceneViewExtension::OnOverlayRender(FPostOpaqueRe
 		// Accesspoint to our Shaders
 		FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(FeatureLevel);
 
-		std::lock_guard<std::recursive_mutex> guard(m_imageMutex);
 		// For all registered images
 		for (int i = 0; i < m_registeredSplatImageList.Num(); ++i)
 		{
@@ -648,7 +766,7 @@ void FGaussianSplatTileRendererSceneViewExtension::OnOverlayRender(FPostOpaqueRe
 
 }
 
-FScreenPassTexture FGaussianSplatTileRendererSceneViewExtension::OnPostProcessingTonemap(FRDGBuilder& GraphBuilder, const FSceneView& SceneView, const FPostProcessMaterialInputs& Inputs)
+FScreenPassTexture FGaussianSplatOffscreenRendererSceneViewExtension::OnPostProcessingTonemap(FRDGBuilder& GraphBuilder, const FSceneView& SceneView, const FPostProcessMaterialInputs& Inputs)
 {
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4
 	// Works in 5.5, while 5.4 fails silently in non-FXAA anti aliasing
@@ -682,6 +800,7 @@ FScreenPassTexture FGaussianSplatTileRendererSceneViewExtension::OnPostProcessin
 	// Here starts the RDG stuff
 	RDG_EVENT_SCOPE(GraphBuilder, "Gaussian Splats Tile Renderer Post Tone Mapping Composite");
 	{
+		std::lock_guard<std::recursive_mutex> guard(m_imageMutex);
 		// Accesspoint to our Shaders
 		FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(ViewFamily.GetFeatureLevel());
 
@@ -785,4 +904,3 @@ FScreenPassTexture FGaussianSplatTileRendererSceneViewExtension::OnPostProcessin
 #endif
 }
 
-#endif

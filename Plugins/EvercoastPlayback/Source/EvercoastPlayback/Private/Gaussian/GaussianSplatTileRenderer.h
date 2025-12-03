@@ -43,7 +43,7 @@ public:
 	bool RunPipelineWithLastSavedInput_RenderThread(FRHICommandListImmediate& RHICmdList);
 private:
 	void ReservePermanentResources();
-	void ReserveViewDependentResources(const FVector4 InScreenParam);
+	void ReserveViewDependentResources(const FVector4& InScreenParam);
 	void ReserveFirstStageResources(uint32_t splatCount);
 	void ReserveSecondStageResources(uint32_t tileConjugateSplatCount, const FVector4& InScreenParam);
 

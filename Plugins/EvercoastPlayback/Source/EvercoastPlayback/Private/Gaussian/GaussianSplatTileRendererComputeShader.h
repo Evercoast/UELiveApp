@@ -84,8 +84,6 @@ public:
 		SHADER_PARAMETER_SRV(StructuredBuffer<SplatView>, TheSplatViewData)
         SHADER_PARAMETER_SRV(StructuredBuffer<uint32_t>, TileConjugateSplatValuesSorted)
 		SHADER_PARAMETER_SRV(StructuredBuffer<FUintVector2>, TileToSplatRanges)
-		//SHADER_PARAMETER_UAV(RWStructuredBuffer<uint32_t>, OutColourR8G8B8A8Buffer)
-		//SHADER_PARAMETER_UAV(RWStructuredBuffer<float>, OutDepthF32Buffer)
 		SHADER_PARAMETER_UAV(RWTexture2D<FVector4f>, OutputColourTexture)
 		SHADER_PARAMETER_UAV(RWTexture2D<float>, OutputDepthTexture)
 

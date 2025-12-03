@@ -45,10 +45,8 @@ public:
 	virtual std::shared_ptr<GenericDecodeResult> TakeResult() override;
 
 private:
-#if PLATFORM_WINDOWS
     bool DecodeMemoryStreamPLY(const uint8_t* stream, size_t stream_size, double timestamp, int64_t frameIndex, GenericDecodeOption* option);
     bool DecodeMemoryStreamECSPZ(const uint8_t* stream, size_t stream_size, double timestamp, int64_t frameIndex, GenericDecodeOption* option);
-#endif
     std::shared_ptr<GenericDecodeResult> m_result;
 };
 

@@ -87,7 +87,7 @@ void FGaussianSplatTileRenderer::ReleaseViewDependentResources()
 	}
 }
 
-void FGaussianSplatTileRenderer::ReserveViewDependentResources(const FVector4 InScreenParam)
+void FGaussianSplatTileRenderer::ReserveViewDependentResources(const FVector4& InScreenParam)
 {
 
 
@@ -398,7 +398,7 @@ void FGaussianSplatTileRenderer::ReserveFirstStageResources(uint32_t splatCount)
 		FRHIResourceCreateInfo EncodedSplatPositionCreateInfo(TEXT("EncodedSplatPositionBuffer"));
 		m_encodedSplatPositionBuffer = RHICmdList.CreateBuffer(
 			sizeof(EncodedSplatVector3) * m_maxSplats,
-			BUF_ShaderResource | BUF_ByteAddressBuffer,
+			BUF_ShaderResource | BUF_StructuredBuffer,
 			sizeof(EncodedSplatVector3),
 			ERHIAccess::SRVMask, 
 			EncodedSplatPositionCreateInfo
@@ -408,7 +408,7 @@ void FGaussianSplatTileRenderer::ReserveFirstStageResources(uint32_t splatCount)
 		FRHIResourceCreateInfo EncodedSplatColourAlphaCreateInfo(TEXT("EncodedSplatColourAlphaBuffer"));
 		m_encodedSplatColourAlphaBuffer = RHICmdList.CreateBuffer(
 			sizeof(EncodedSplatColourAlpha) * m_maxSplats,
-			BUF_ShaderResource | BUF_ByteAddressBuffer,
+			BUF_ShaderResource | BUF_StructuredBuffer,
 			sizeof(EncodedSplatColourAlpha),
 			ERHIAccess::SRVMask,
 			EncodedSplatColourAlphaCreateInfo
@@ -418,7 +418,7 @@ void FGaussianSplatTileRenderer::ReserveFirstStageResources(uint32_t splatCount)
 		FRHIResourceCreateInfo EncodedSplatScaleCreationInfo(TEXT("EncodedSplatScaleBuffer"));
 		m_encodedSplatScaleBuffer = RHICmdList.CreateBuffer(
 			sizeof(EncodedSplatScale) * m_maxSplats,
-			BUF_ShaderResource | BUF_ByteAddressBuffer,
+			BUF_ShaderResource | BUF_StructuredBuffer,
 			sizeof(EncodedSplatScale),
 			ERHIAccess::SRVMask,
 			EncodedSplatScaleCreationInfo
@@ -428,7 +428,7 @@ void FGaussianSplatTileRenderer::ReserveFirstStageResources(uint32_t splatCount)
 		FRHIResourceCreateInfo EncodedSplatRotationCreationInfo(TEXT("EncodedSplatRotationBuffer"));
 		m_encodedSplatRotationBuffer = RHICmdList.CreateBuffer(
 			sizeof(EncodedSplatRotation) * m_maxSplats,
-			BUF_ShaderResource | BUF_ByteAddressBuffer,
+			BUF_ShaderResource | BUF_StructuredBuffer,
 			sizeof(EncodedSplatRotation),
 			ERHIAccess::SRVMask,
 			EncodedSplatRotationCreationInfo
@@ -438,7 +438,7 @@ void FGaussianSplatTileRenderer::ReserveFirstStageResources(uint32_t splatCount)
 		FRHIResourceCreateInfo EncodedSplatSHCoeffsCreationInfo(TEXT("EncodedSplatCoeffsBuffer"));
 		m_encodedSplatSHCoeffsBuffer = RHICmdList.CreateBuffer(
 			sizeof(EncodedSplat3DegreeSHCoeffs) * m_maxSplats,
-			BUF_ShaderResource | BUF_ByteAddressBuffer,
+			BUF_ShaderResource | BUF_StructuredBuffer,
 			sizeof(EncodedSplat3DegreeSHCoeffs),
 			ERHIAccess::SRVMask,
 			EncodedSplatSHCoeffsCreationInfo
@@ -1404,5 +1404,8 @@ FVector2f FGaussianSplatTileRenderer::GetSavedOutputRenderTargetUVScale() const
 
 	return SavedOutputRenderTargetUVScale;
 }
+
+#undef __CreateUAV
+#undef __CreateSRV
 
 #endif

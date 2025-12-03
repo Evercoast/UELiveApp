@@ -7,7 +7,8 @@ IMPLEMENT_SHADER_TYPE(, FGaussianSplatPreprocessComputeShader, TEXT("/EvercoastS
 
 bool FGaussianSplatPreprocessComputeShader::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 {
-	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM6);
+	//return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM6);
+	return true;
 }
 
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 3

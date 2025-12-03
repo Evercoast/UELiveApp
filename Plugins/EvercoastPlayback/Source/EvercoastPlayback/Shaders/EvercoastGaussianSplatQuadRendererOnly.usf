@@ -14,7 +14,7 @@ uint SplatCount;
 
 /////////////////////
 // SORTING DATA
-RWStructuredBuffer<uint> SortValueList_A;  // ordinal id, maps to VertexFactory's _InstanceIdToSortedId
+RWBuffer<uint> SortValueList_A; // ordinal id, maps to VertexFactory's _InstanceIdToSortedId
 /////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -28,4 +28,24 @@ void CSInitSortData(uint3 DTid : SV_DispatchThreadID)
 
     // splat ordinal
     SortValueList_A[idx] = idx;
+}
+
+
+Buffer<uint> SortValueResult;
+RWByteAddressBuffer SortValueFinal;
+
+// Try using compute shader to copy Buffer<uint> -> ByteAddressBuffer for vetex factory to use
+// because GPU sort doesn't like ByteAddressBuffer or StructuredBuffer<T>
+// and Vertex Factory doesn't like Buffer<T>
+// Silly but this is the only way I found working on Mac
+[numthreads(COPY_SORTING_THREADS, 1, 1)]
+void CSCopySortData(uint3 DTid : SV_DispatchThreadID)
+{
+    uint idx = DTid.x;
+    if (idx > SplatCount)
+        return;
+
+    // Copy contents from SortValueResult ->SortValueFinal
+    uint resultVal = SortValueResult[idx];
+    SortValueFinal.Store(idx*4, resultVal);
 }

@@ -17,6 +17,7 @@ class EvercoastGaussianSplatCSResult;
 class UMaterialInstanceDynamic;
 class UTextureRenderTarget2D;
 class FGaussianSplatTileRenderer;
+class FGaussianSplatOffscreenQuadRenderer;
 
 class FEvercoastGaussianSplatSceneProxy : public FPrimitiveSceneProxy
 {
@@ -47,6 +48,16 @@ public:
 #endif
 #endif
 
+	/**
+	 *	Called when the rendering thread adds the proxy to the scene.
+	 *	This function allows for generating renderer-side resources.
+	 *	Called in the rendering thread.
+	 */
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 4
+    virtual void CreateRenderThreadResources(FRHICommandListBase& RHICmdList) override;
+#else
+	virtual void CreateRenderThreadResources() override;
+#endif
 	virtual uint32 GetMemoryFootprint(void) const override;
 	uint32 GetAllocatedSize(void) const;
 	void SetEncodedGaussianSplat_RenderThread(FRHICommandListBase& RHICmdList, std::shared_ptr<const EvercoastGaussianSplatCSResult> data);
@@ -69,7 +80,6 @@ public:
 	void SetSplatDecimation(float decimation);
 	void SetSplatExtraScale(float scale);
 	void SetCov2DSqrtKernelSize(float kernelSize);
-	void SetShadowBlobScale(float scale);
 
 	void SetShowSphericalHarmonics0(bool show);
 	void SetShowSphericalHarmonics1(bool show);
@@ -87,27 +97,29 @@ protected:
 	virtual bool ShouldSubmitDynamicMesh(const FSceneView* pView) const;
 private:
 
-	void InitialiseQuadMesh();
-
 	void PerformDataReconForTileRenderer(const FMatrix& InObjectToWorld, const FMatrix& InView, const FMatrix& InProj,
 		const FVector& InCameraPositionWS, const FVector4& InScreenParam, float InCov2DSqrtKernelSize,
 		bool showSH0Colour, bool showSH1Colour, bool showSH2Colour, bool showSH3Colour, const FVector4& InDepthOutputThreshold,
 		std::shared_ptr<const EvercoastGaussianSplatCSResult> encodedGaussian) const;
 
+	void PerformDataReconForOffscreenQuadRenderer(const FMatrix& InObjectToWorld, const FMatrix& InView, const FMatrix& InProj,
+		const FVector& InCameraPositionWS, const FVector4& InScreenParam, float InExtraSplatScale, float InCov2DSqrtKernelSize, 
+		bool showSH0Colour, bool showSH1Colour, bool showSH2Colour, bool showSH3Colour, const FVector4& InDepthOutputThreshold,
+		std::shared_ptr<const EvercoastGaussianSplatCSResult> encodedGaussian) const;
+
 	// remove constantness requirement in GetDynamicMeshElements() const
-	mutable FEvercoastGaussianSplatVertexFactory m_vertexFactory;
+	mutable FEvercoastGaussianSplatBaseVertexFactory m_vertexFactory;
 
 #if PLATFORM_WINDOWS
 	// Tile renderer is here, it no longer relies on vertex factory now
 	TSharedPtr<FGaussianSplatTileRenderer> m_tileRenderer;
 #endif
 
+	TSharedPtr<FGaussianSplatOffscreenQuadRenderer> m_offscreenQuadRenderer;
+
 	// Splats data
 	std::shared_ptr<const EvercoastGaussianSplatCSResult> m_encodedGaussian;
 	mutable std::recursive_mutex	m_gaussianFrameLock;
-
-	FStaticMeshVertexBuffers m_quadVertexBuffers;
-	FDynamicMeshIndexBuffer32 m_quadIndexBuffer;
 
 	UMaterialInterface* m_material;
 

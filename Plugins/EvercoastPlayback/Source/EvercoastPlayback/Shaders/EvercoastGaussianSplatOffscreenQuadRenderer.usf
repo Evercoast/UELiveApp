@@ -1,0 +1,214 @@
+#include "/Engine/Public/Platform.ush"
+#include "/Engine/Private/Common.ush"
+
+// GaussianSplatData type
+#include "GaussianSplatTypes.ush"
+#include "GaussianSplatConstants.ush"
+#include "GaussianSplatCommon.ush"
+
+int NumSplats;
+StructuredBuffer<SplatViewData> TheSplatViewData;
+ByteAddressBuffer SortValueList; // corresponds to _SortValueList from compute shader
+float4 VecScreenParams; // (screen_width, screen_height, 1/screen_width, 1/screen_height)
+Texture2D SplatColorMap;
+float2 SplatColorMapUVScale;
+float4 DepthOutputThreshold; // x = enable depth write, w = alpha cutout threshold
+SamplerState LinearClamp;
+
+struct VSIn
+{
+    float4 QuadLocalPos : ATTRIBUTE0;
+    uint QuadIndex : SV_InstanceID;
+};
+
+struct VSOut
+{
+    float4 pos : SV_Position;
+    float4 pos2 : TEXCOORD0;
+    float2 mean_xy : TEXCOORD1;
+    float4 con_o : TEXCOORD2;
+    float4 col : COLOR;
+};
+
+
+struct VSOutFast
+{
+    float4 pos : SV_Position;
+    float4 pos2 : TEXCOORD0;
+    float2 gaussian_dist : TEXCOORD1;
+    float4 col : COLOR;
+};
+
+SplatViewData GetSortedSplatView(uint inst_id)
+{
+    if (inst_id < NumSplats)
+    {
+        uint sortedId = SortValueList.Load(inst_id * 4);
+        return TheSplatViewData[sortedId];
+    }
+    else
+    {
+        return (SplatViewData) 0;
+    }
+}
+
+/////////////////////////////////
+// Colour map pass
+// vertex shader
+VSOut OffscreenGaussianQuadVS(VSIn In)
+{
+    VSOut output;
+    SplatViewData splatView = GetSortedSplatView(In.QuadIndex);
+    // Use splatView.axis1 and axis2 to reconstruct the quad
+
+    float2 quadLocalPosition = In.QuadLocalPos.xy * 2.0; // this 2.0 is the hacky part, 
+
+	// Calc clip space offset using axis1 and axis2
+    float3 clip_pos = splatView.clip_pos;
+    float clip_pos_w = splatView.radii_clipz.y;
+    float4 output_pos = float4(clip_pos.xy + (quadLocalPosition.x * splatView.axis1 + quadLocalPosition.y * splatView.axis2), clip_pos.z, clip_pos_w);
+
+    output.pos = output_pos;
+    output.pos2 = output_pos;
+    output.mean_xy = splatView.mean_xy; // pass to PS
+    output.con_o = splatView.conic; // pass to PS
+    output.col = splatView.diffuse_opacity;
+
+    return output;
+}
+
+// pixel shader
+float4 OffscreenGaussianQuadPS(VSOut In) : SV_Target
+{
+    float2 uv = (In.pos2.xy/In.pos2.w + float2(1, 1)) * 0.5;
+    uv.y = 1.0 - uv.y; // UV correction
+    float2 pixf = uv * VecScreenParams.xy;
+    
+    float2 mean = In.mean_xy;
+    mean.y = VecScreenParams.y - mean.y; // mean_xy correction
+    
+    float alpha = 0;
+    if (!CalcAlpha(In.con_o, mean, pixf, alpha))
+    {
+        // invalid alpha
+        discard;
+    }
+   
+    return float4(In.col.rgb * alpha, alpha);
+}
+
+
+
+// vertex shader
+VSOutFast OffscreenGaussianQuadFastVS(VSIn In)
+{
+    VSOutFast output;
+    SplatViewData splatView = GetSortedSplatView(In.QuadIndex);
+    // Use splatView.axis1 and axis2 to reconstruct the quad
+    
+    float2 quadLocalPosition = In.QuadLocalPos.xy * 2.0; // this 2.0 is the hacky part
+
+	// Calc clip space offset using axis1 and axis2
+    float3 clip_pos = splatView.clip_pos;
+    float clip_pos_w = splatView.radii_clipz.y;
+    float4 output_pos = float4(clip_pos.xy + (quadLocalPosition.x * splatView.axis1 + quadLocalPosition.y * splatView.axis2), clip_pos.z, clip_pos_w);
+
+    output.pos = output_pos;
+    output.pos2 = output_pos;
+    output.gaussian_dist = quadLocalPosition; // pass fixed [-2, 2] as gaussian dist to PS
+    output.col = splatView.diffuse_opacity;
+
+    return output;
+}
+
+// This is the hacky Unity implementation pixel shader
+float4 OffscreenGaussianQuadFastPS(VSOutFast In) : SV_Target
+{
+    float A = -dot(In.gaussian_dist, In.gaussian_dist);
+    if (A < -4.0)
+        discard;
+    float B = exp(A) * In.col.a;
+    
+    return float4(In.col.rgb * B, B);
+}
+
+//////////////////////////////////////////////////////////////
+// Depth bake pass
+float4 GetBakedDepth(float4 clip_pos)
+{
+    float2 uv = (clip_pos.xy / clip_pos.w + float2(1, 1)) * 0.5;
+    uv.y = 1.0 - uv.y;
+    float4 SplatColour = SplatColorMap.Sample(LinearClamp, uv * SplatColorMapUVScale);
+    
+    if (DepthOutputThreshold.x > 0) // check if depth write alpha cutout is on
+    {
+        // do depth threshold
+        if (SplatColour.a > DepthOutputThreshold.w)
+        {
+            return float4(clip_pos.zzz / clip_pos.w, SplatColour.a);
+        }
+        else
+        {
+            return 0;
+        }
+    }
+    else // otherwise always output depth for later Z test 
+    {
+        return float4(clip_pos.zzz / clip_pos.w, SplatColour.a);
+    }
+}
+
+// If any opacity was output to color map, write depth
+float4 OffscreenGaussianQuadBakeDepthPS(VSOut In) : SV_Target
+{
+    return GetBakedDepth(In.pos2);
+}
+
+// The version uses VSOutFast
+float4 OffscreenGaussianQuadBakeDepthFastPS(VSOutFast In) : SV_Target
+{
+    return GetBakedDepth(In.pos2);
+}
+
+
+//////////////////////////////////////////////////////////////
+// Alpha cut out pass
+void OffscreenGaussianQuadAlphaCutoutVS(
+	float2 InPosition : ATTRIBUTE0,
+	float2 InUV : ATTRIBUTE1,
+	out FScreenVertexOutput Output
+	)
+{
+#if METAL_PROFILE || COMPILER_GLSL_ES3_1
+	DrawRectangle( float4( InPosition, 0, 1 ), InUV, Output.Position, Output.UV);
+#else
+    float2 OutUV;
+    DrawRectangle(float4(InPosition, 0, 1), InUV, Output.Position, OutUV);
+    Output.UV = MaterialFloat2(OutUV);
+#endif
+}
+
+// Alpha cut out quad drawing vertex shader
+void OffscreenGaussianQuadAlphaCutoutPS(noperspective float2 InUV : TEXCOORD0, out float4 OutColor : SV_Target0)
+{
+    float4 SplatColour = SplatColorMap.Sample(LinearClamp, InUV);
+    
+    if (DepthOutputThreshold.x > 0) // check if depth write alpha cutout is on
+    {
+        // do alpha cutout
+        float alpha = SplatColour.a;
+        if (alpha > DepthOutputThreshold.w)
+        {
+            OutColor = float4(clamp(SplatColour.rgb / alpha, 0.0, 1.0), 1); // override alpha and boost edge colour with inversion of alpha
+        }
+        else
+        {
+            OutColor = 0;
+        }
+    }
+    else // otherwise always return SplatColour
+    {
+        OutColor = SplatColour;
+    }
+
+}

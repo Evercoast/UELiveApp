@@ -3,6 +3,18 @@
 
 #include "GaussianSplatConstants.ush"
 
+struct EncodedSplatPosition
+{
+    uint x_bits;
+    uint y_bits;
+    uint z_bits;
+};
+
+struct EncodedSplat3DegreeSHCoeffs
+{
+    uint sh[15];
+};
+
 struct DecodedSplatData
 {
     float4 pos;
@@ -20,9 +32,9 @@ struct SplatViewData
     float4 diffuse_opacity;
     float4 conic;
     int2   mean_xy;         // screen space mean
-    float2 radii_clipz;     // my_radius, clip depth
+    float2 radii_clipz;     // my_radius, depth in clip space (repurposed to clip_pos.zw in offscreen quad renderer)
     uint   depth16;         // view space depth in 16bit float format, stored in lower 16 bits
-    uint3  padding;
+    float3 clip_pos;        // position in clip space before perspective division
     int4   tile_idx_ranges; // covered tile index from xy(top left) to zw(bottom right)    
 };
 

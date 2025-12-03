@@ -1,20 +1,17 @@
 #include "Gaussian/GaussianSplatCompositeSubsystem.h"
-#include "Gaussian/GaussianSplatTileRendererSceneViewExtension.h"
+#include "Gaussian/GaussianSplatOffscreenRendererSceneViewExtension.h"
 #include "SceneViewExtension.h"
 
 void UGaussianSplatCompositeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 
-#if PLATFORM_WINDOWS
-	CompositeSceneViewExtension = FSceneViewExtensions::NewExtension<FGaussianSplatTileRendererSceneViewExtension>();
+	CompositeSceneViewExtension = FSceneViewExtensions::NewExtension<FGaussianSplatOffscreenRendererSceneViewExtension>();
 	CompositeSceneViewExtension->Initialize();
-#endif
 }
 
 void UGaussianSplatCompositeSubsystem::Deinitialize()
 {
-#if PLATFORM_WINDOWS
 	if (CompositeSceneViewExtension)
 	{
 		CompositeSceneViewExtension->IsActiveThisFrameFunctions.Empty();
@@ -33,6 +30,6 @@ void UGaussianSplatCompositeSubsystem::Deinitialize()
 
 	CompositeSceneViewExtension.Reset();
 	CompositeSceneViewExtension = nullptr;
-#endif
+
 	Super::Deinitialize();
 }

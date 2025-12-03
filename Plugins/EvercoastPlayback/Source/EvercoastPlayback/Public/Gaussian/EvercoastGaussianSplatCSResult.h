@@ -46,14 +46,14 @@ struct EncodedSplat3DegreeSHCoeffs
 struct alignas(16) SplatView
 {
     float pos[4];               // local space
-    float axis1[2];             // clip space
-    float axis2[2];             // clip space
+    float axis1[2];             // axis1 in clip space
+    float axis2[2];             // axis2 in clip space
     float diffuse_opacity[4];
     float conic[4];
     int   mean_xy[2];           // mean, screen space
-    float radii_clipz[2];       // my_radius, depth in clip space
+    float radii_clipz[2];       // my_radius, depth in clip space (repurposed to clip_pos.zw in offscreen quad renderer)
     unsigned int depth16;       // view space depth in 16bit float format stored in lower bits
-    unsigned int padding[3];
+    float clip_pos[3];          // position in clip space before perspective division
     int   tile_idx_ranges[4];   // covered tile index from xy(top left) to zw(bottom right)
 };
 #pragma pack(pop)

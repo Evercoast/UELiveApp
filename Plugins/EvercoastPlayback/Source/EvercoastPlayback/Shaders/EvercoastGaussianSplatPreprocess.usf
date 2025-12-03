@@ -19,11 +19,18 @@ uint _SHDegree;
 uint _SHDim;
 uint4 _SHRender; // x - Diffuse(SH0), y - SH1, z - SH2, w - SH3
 float _PositionScaling;
-ByteAddressBuffer _EncodedSplatPos;
-ByteAddressBuffer _EncodedSplatColA;
-ByteAddressBuffer _EncodedSplatScale;
-ByteAddressBuffer _EncodedSplatRotation;
-ByteAddressBuffer _EncodedSplatSHCoeffs;
+
+// Android Vulkan: Change ByteAddressBuffer to StructuredBuffer<> for better support
+//ByteAddressBuffer _EncodedSplatPos;
+StructuredBuffer<EncodedSplatPosition> _EncodedSplatPos;
+//ByteAddressBuffer _EncodedSplatColA;
+StructuredBuffer<uint> _EncodedSplatColA;
+//ByteAddressBuffer _EncodedSplatScale;
+StructuredBuffer<uint> _EncodedSplatScale;
+//ByteAddressBuffer _EncodedSplatRotation;
+StructuredBuffer<uint> _EncodedSplatRotation;
+//ByteAddressBuffer _EncodedSplatSHCoeffs;
+StructuredBuffer<EncodedSplat3DegreeSHCoeffs> _EncodedSplatSHCoeffs;
 ///////////////////////
 
 /////////////////////
@@ -38,7 +45,7 @@ RWStructuredBuffer<uint> _TilesTouched; // intermediate buffer, Size=_SplatCount
 
 /////////////////////
 // SORTING DATA FOR QUAD RENDERER ONLY
-RWStructuredBuffer<uint> _SortKeyList_A;    // integerized View space Z
+RWBuffer<uint> _SortKeyList_A; // integerized View space Z
 /////////////////////
 
 /////////////////////
@@ -55,6 +62,7 @@ float3 _CameraPosWS;
 // FOR QUAD RENDERER ONLY
 float2 _ClipOverrideDecimation; // Greater than 0 means no clipping(for shadowing algorithm)
 float _SplatExtraScale;
+int _SortingOrder; // 0 = front to back, 1 = back to front (painter's algorithm)
 /////////////////////
 
 ////////////////////
@@ -137,9 +145,13 @@ float3 DecodePosition(uint index)
     uint baseByteOffset = index * ENCODED_SPLAT_POS_STRIDE;
 
     // RWByteAddressBuffer.Load() returns 32 bit uint(4 bytes) so don't use Load3()
-    uint x_bits = _EncodedSplatPos.Load(baseByteOffset);
-    uint y_bits = _EncodedSplatPos.Load(baseByteOffset+4);
-    uint z_bits = _EncodedSplatPos.Load(baseByteOffset+8);
+    //uint x_bits = _EncodedSplatPos.Load(baseByteOffset);
+    //uint y_bits = _EncodedSplatPos.Load(baseByteOffset+4);
+    //uint z_bits = _EncodedSplatPos.Load(baseByteOffset+8);
+
+    uint x_bits = _EncodedSplatPos[index].x_bits;
+    uint y_bits = _EncodedSplatPos[index].y_bits;
+    uint z_bits = _EncodedSplatPos[index].z_bits;
 
     float3 pos;
     pos.x = DecodedFixed24BitInteger(x_bits);
@@ -153,7 +165,9 @@ float4 DecodeColourAlpha(uint index)
 {
     static const uint ENCODED_SPLAT_COL_A_STRIDE = 4;
     // RWByteAddressBuffer.Load() returns 32 bit uint(4 bytes) so don't use Load4()
-    uint rgba = _EncodedSplatColA.Load(index * ENCODED_SPLAT_COL_A_STRIDE);
+    //uint rgba = _EncodedSplatColA.Load(index * ENCODED_SPLAT_COL_A_STRIDE);
+    
+    uint rgba = _EncodedSplatColA[index];
 
     // decode 32 bits to respective float values
     float r = (rgba & 0xFF) / 255.0;
@@ -173,7 +187,8 @@ float3 DecodeScale(uint index)
 {
     static const uint ENCODED_SPLAT_SCALE_STRIDE = 4;
 
-    uint scale_packed = _EncodedSplatScale.Load(index * ENCODED_SPLAT_SCALE_STRIDE);
+    //uint scale_packed = _EncodedSplatScale.Load(index * ENCODED_SPLAT_SCALE_STRIDE);
+    uint scale_packed = _EncodedSplatScale[index];
     uint sx = scale_packed & 0xFF;
     uint sy = (scale_packed >> 8) & 0xFF;
     uint sz = (scale_packed >> 16) & 0xFF;
@@ -191,7 +206,8 @@ float4 DecodeRotation(uint index)
 {
     static const uint ENCODED_SPLAT_ROTATION_STRIDE = 4;
 
-    uint quat_packed = _EncodedSplatRotation.Load(index * ENCODED_SPLAT_ROTATION_STRIDE);
+    //uint quat_packed = _EncodedSplatRotation.Load(index * ENCODED_SPLAT_ROTATION_STRIDE);
+    uint quat_packed = _EncodedSplatRotation[index];
 
     uint rx = quat_packed & 0xFF;
     uint ry = (quat_packed >> 8) & 0xFF;
@@ -238,7 +254,18 @@ float3 DecodeSHCoeffs(uint index, uint sh_coeff_index)
 {
     const uint ENCODED_SPLAT_SHCOEFFS_STRIDE = _SHDim * 4;
     const uint SHCOEFF_STRIDE = 4;
-    uint shcoeffs_packed = _EncodedSplatSHCoeffs.Load(index * ENCODED_SPLAT_SHCOEFFS_STRIDE + sh_coeff_index * SHCOEFF_STRIDE);
+    
+    //uint shcoeffs_packed = _EncodedSplatSHCoeffs.Load(index * ENCODED_SPLAT_SHCOEFFS_STRIDE + sh_coeff_index * SHCOEFF_STRIDE);
+
+    uint shcoeffs_packed;
+    if (_SHDegree != 0)
+    {
+        shcoeffs_packed = _EncodedSplatSHCoeffs[index].sh[sh_coeff_index];
+    }
+    else
+    {
+        shcoeffs_packed = 0;
+    }
     
     // R in the lowest bit in little endian
     uint sh_r = (shcoeffs_packed >> 0) & 0xFF;
@@ -643,7 +670,9 @@ void CSCalcViewDataForTileRenderer(uint3 DTid : SV_DispatchThreadID)
     // NOT USED BY TILE RENDERER:
     //splatView.axis1
     //splatView.axis2
+    //splatView.clip_pos
     //_SortKeyList_A
+    
 }
 
 
@@ -679,10 +708,29 @@ void CSCalcViewDataForQuadRenderer(uint3 DTid : SV_DispatchThreadID)
     // For later run GPU sort
     // Sort back to front for quad renderer
     uint sortValueUint32 = FloatToSortableUint(pos_in_view.z);
-    _SortKeyList_A[idx] = 0xffffffff - sortValueUint32;
+    
+    int SO = _SortingOrder;
+    _SortKeyList_A[idx] = SO * 0xffffffff + (1 - SO * 2) * sortValueUint32;
+    
+    // When SO = 0 or 1, equivalent to:
+    /*
+    // From back to front (painter's algorithm)
+    if (_SortingOrder > 0)
+    {
+        _SortKeyList_A[idx] = 0xffffffff - sortValueUint32;
+    }
+    // From front to back (OneMiusDstAlpha, One blending trick)
+    else
+    {
+        _SortKeyList_A[idx] = sortValueUint32;
+    }
+    */
 
     float4 pos_in_clip_pre_division = mul(pos_in_view, _MatrixP);
     float4 pos_in_clip = pos_in_clip_pre_division / pos_in_clip_pre_division.w;
+    
+    splatView.clip_pos = pos_in_clip_pre_division.xyz;
+    splatView.radii_clipz = pos_in_clip_pre_division.zw;
     // Screen space mean position
     splatView.mean_xy = (pos_in_clip.xy + 1.0) * 0.5 * _VecScreenParams.xy;
     
@@ -791,6 +839,5 @@ void CSCalcViewDataForQuadRenderer(uint3 DTid : SV_DispatchThreadID)
     // NOT USED IN QUAD RENDERER:
     //splatView.depth16
     //splatView.tile_idx_ranges;
-    //splatView.radii_clipz;
     //_TilesTouched
 }

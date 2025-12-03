@@ -4,106 +4,96 @@
 #include "CoreMinimal.h"
 #include "VertexFactory.h"
 #include "LocalVertexFactory.h"
+#include "Gaussian/GaussianSplatBaseQuadRenderer.h"
 #include <memory>
 #include <mutex>
 
 class EvercoastGaussianSplatCSResult;
-class FEvercoastGaussianSplatVertexFactoryShaderParameters;
 
 #define GPU_SORT_BUFFER_COUNT (2)
-// TODO: from FLocalVertexFactory to FVertexFactory
-class FEvercoastGaussianSplatVertexFactory final : public FLocalVertexFactory
+class FEvercoastGaussianSplatBaseVertexFactoryParameters;
+class FEvercoastGaussianSplatBaseVertexFactory final : public FVertexFactory
 {
-	DECLARE_VERTEX_FACTORY_TYPE(FEvercoastGaussianSplatVertexFactory);
+	DECLARE_VERTEX_FACTORY_TYPE(FEvercoastGaussianSplatBaseVertexFactory);
 
+	friend class FEvercoastGaussianSplatBaseVertexFactoryParameters;
 public:
-	FEvercoastGaussianSplatVertexFactory(ERHIFeatureLevel::Type InFeatureLevel, const char* InDebugName);
+	FEvercoastGaussianSplatBaseVertexFactory(ERHIFeatureLevel::Type InFeatureLevel);
 
-	// ~Beginning of VertexFactory vtable
-	static bool ShouldCompilePermutation(const FVertexFactoryShaderPermutationParameters& Parameters);
-	static void ModifyCompilationEnvironment(const FVertexFactoryShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment);
-	// ~End of VertexFactory vtable
-
-	// Beginning of FRenderResource interface.
+	/**
+	 * Constructs render resources for this vertex factory.
+	 */
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 3
 	virtual void InitRHI(FRHICommandListBase& RHICmdList) override;
 #else
 	virtual void InitRHI() override;
 #endif
-	virtual void ReleaseRHI() override;
-	// End of FRenderResource interface
 
-	
+
+	/**
+	 * Release render resources for this vertex factory.
+	 */
+	virtual void ReleaseRHI() override;
+
+	/**
+	 * Should we cache the material's shadertype on this platform with this vertex factory?
+	 */
+	static bool ShouldCompilePermutation(const FVertexFactoryShaderPermutationParameters& Parameters);
+
+	/**
+	 * Set parameters for this vertex factory instance.
+	 */
+	/*
+	void SetParameters(const FEvercoastGaussianSplatBaseVertexFactoryParameters& InUniformParameters);
+
+	inline const FUniformBufferRHIRef GetPointCloudVertexFactoryUniformBuffer() const
+	{
+		return UniformBuffer;
+	}
+	*/
+
 	// Just reserve RHI resources, no ownership of the data is kept
 	void ReserveGaussianSplatRHI(std::shared_ptr<const EvercoastGaussianSplatCSResult> encodedGaussian);
 
 	// Run compute shader to decode and deinterlace the data, then transition the resource to SRV ready for rendering
-	void PerformComputeShaderSplatDataReconForQuadRenderer(const FMatrix& ObjectToWorld, const FMatrix& InView, const FMatrix& InProj, 
-		const FVector& InCameraPositionWS, const FVector4& InScreenParam, bool isShadowPass, float splatDecimation, float splatExtraScale, 
+	void PerformComputeShaderSplatDataReconForQuadRenderer(const FMatrix& ObjectToWorld, const FMatrix& InView, const FMatrix& InProj,
+		const FVector& InCameraPositionWS, const FVector4& InScreenParam, bool isShadowPass, float splatDecimation, float splatExtraScale,
 		float cov2DSqrtKernelSize, bool showSH0Colour, bool showSH1Colour, bool showSH2Colour, bool showSH3Colour,
 		std::shared_ptr<const EvercoastGaussianSplatCSResult> encodedGaussian);
 
-	void SetShadowBlobScale(float scale);
-
 	uint32_t GetCurrentReconstructedNumSplats() const
 	{
-		std::lock_guard<std::recursive_mutex> guard(m_accessMetadataLock);
-		return m_currReconstructedNumSplats;
+		return m_quadRenderer->GetCurrentReconstructedNumSplats();
 	}
 
 	// FOR DEBUG ONLY
 	int GetCurrentReconstructedFrameIndex() const
 	{
-		std::lock_guard<std::recursive_mutex> guard(m_accessMetadataLock);
-		return m_currReconFrameIndex;
+		return m_quadRenderer->GetCurrentReconstructedFrameIndex();
 	}
 
+	uint32_t GetNumOfVertices() const;
+	FBufferRHIRef GetVertexBufferRHI() const;
+
+	uint32_t GetNumOfIndices() const;
+	FBufferRHIRef GetIndexBufferRHI() const;
+	FIndexBuffer* GetIndexBufferPtr() const;
+
 private:
-	friend class FEvercoastGaussianSplatVertexFactoryShaderParameters;
 
 	void ReserveGaussianSplatCount(uint32_t inNumSplats);
 	void CreateGaussianSplatRHIResources();
-	void ReleaseGaussianSplatRHIResources();
 
-	// Aggrigate all data here!
-	// Metadata
-	uint32_t m_numSplats;
-	uint32_t m_maxSplats;
-	uint32_t m_currSortResultBufferIndex;
-	float m_shadowBlobScale;
+	TSharedPtr<FGaussianSplatBaseQuadRenderer> GetQuadRenderer() const
+	{
+		return m_quadRenderer; // needs copy value
+	}
+
+	TSharedPtr<FGaussianSplatBaseQuadRenderer> m_quadRenderer;
+
 	
-	// Buffers
-	// For quad renderer's sorting(back to front)
-	FBufferRHIRef m_sortKeyListBuffer[GPU_SORT_BUFFER_COUNT];
-	FBufferRHIRef m_sortValueListBuffer[GPU_SORT_BUFFER_COUNT];
-	// Fort decoding and recon
-	FBufferRHIRef m_encodedSplatPositionBuffer;     // position
-	FBufferRHIRef m_encodedSplatColourAlphaBuffer;  // colour + alpha
-	FBufferRHIRef m_encodedSplatScaleBuffer;		// scale
-	FBufferRHIRef m_encodedSplatRotationBuffer;		// rotation
-	FBufferRHIRef m_encodedSplatSHCoeffsBuffer;		// SH coeffs
-	FBufferRHIRef m_splatViewBuffer;
 
-
-	// UAV & SRV
-	// Sorting
-	FUnorderedAccessViewRHIRef m_sortKeyListUAV[GPU_SORT_BUFFER_COUNT];
-	FShaderResourceViewRHIRef m_sortKeyListSRV[GPU_SORT_BUFFER_COUNT];
-	FUnorderedAccessViewRHIRef m_sortValueListUAV[GPU_SORT_BUFFER_COUNT];
-	FShaderResourceViewRHIRef m_sortValueListSRV[GPU_SORT_BUFFER_COUNT]; // <-- do we really need it?
-	// Decoding and recon
-	FShaderResourceViewRHIRef m_encodedSplatPositionSRV;
-	FShaderResourceViewRHIRef m_encodedSplatColourAlphaSRV;
-	FShaderResourceViewRHIRef m_encodedSplatScaleSRV;
-	FShaderResourceViewRHIRef m_encodedSplatRotationSRV;
-	FShaderResourceViewRHIRef m_encodedSplatSHCoeffsSRV;
-
-	FUnorderedAccessViewRHIRef m_splatViewUAV;
-	FShaderResourceViewRHIRef m_splatViewSRV;
-
-	std::recursive_mutex m_accessRHILock;
-	mutable std::recursive_mutex m_accessMetadataLock;
-
-	int m_currReconFrameIndex; // for debug purpose only
-	uint32_t m_currReconstructedNumSplats; // for keeping num of splats consistent across compute shader and vertex factory
+	// Maybe we should switch to uniform buffer anyway
+	/** Buffers to read from */
+	//FUniformBufferRHIRef UniformBuffer;
 };

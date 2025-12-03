@@ -3,22 +3,18 @@
 #include "Gaussian/EvercoastGaussianSplatCSRendererComp.h"
 #include "EvercoastVoxelDecoder.h"
 #include "Gaussian/GaussianSplatTileRenderer.h"
+#include "Gaussian/GaussianSplatOffscreenQuadRenderer.h"
 #include "Gaussian/GaussianSplatCompositeSubsystem.h"
-#include "Gaussian/GaussianSplatTileRendererSceneViewExtension.h"
+#include "Gaussian/GaussianSplatOffscreenRendererSceneViewExtension.h"
 
 FEvercoastGaussianSplatSceneProxy::FEvercoastGaussianSplatSceneProxy(const UEvercoastGaussianSplatCSRendererComp* component, UMaterialInterface* material,
 	EGaussianSplatRendererType rendererType,
 	float splatDecimation, float splatExtraScale, float cov2DSqrtKernelSize, bool showDiffuseColour, bool showSH1Colour, bool showSH2Colour, bool showSH3Colour,
 	bool enableTileRendererDepthWrite, EGaussianSplatHookStage tileRendererHookStage, float InAlphaCutoutThreshold) :
 	FPrimitiveSceneProxy(component),
-	m_vertexFactory(GetScene().GetFeatureLevel(), "GaussianSplatOrientedQuadVertexFactory"),
+	m_vertexFactory(GetScene().GetFeatureLevel()),
 	m_material(material),
-#if PLATFORM_WINDOWS
 	m_rendererType(rendererType),
-#else
-	// Other platform has no support of tile renderer yet
-	m_rendererType(EGaussianSplatRendererType::QUAD_RENDERER),
-#endif
 	m_tileRendererHookStage(tileRendererHookStage),
 	m_splatDecimation(splatDecimation),
 	m_splatExtraScale(splatExtraScale),
@@ -31,12 +27,17 @@ FEvercoastGaussianSplatSceneProxy::FEvercoastGaussianSplatSceneProxy(const UEver
 	m_depthOutputThreshold(FVector4(0, 0, 0, InAlphaCutoutThreshold)),
 	MaterialRelevance(component->GetMaterialRelevance(GetScene().GetFeatureLevel()))
 {
-	InitialiseQuadMesh();
-
-	
 #if PLATFORM_WINDOWS
 	m_tileRenderer = MakeShared<FGaussianSplatTileRenderer>();
+#else
+	if (m_rendererType == EGaussianSplatRendererType::TILE_RENDERER)
+	{
+		// force to offscreen quad renderer
+		m_rendererType = EGaussianSplatRendererType::OFFSCREEN_QUAD_RENDERER;
+	}
 #endif
+
+	m_offscreenQuadRenderer = MakeShared<FGaussianSplatOffscreenQuadRenderer>();
 
 #if RHI_RAYTRACING
 	if (IsRayTracingEnabled())
@@ -46,8 +47,8 @@ FEvercoastGaussianSplatSceneProxy::FEvercoastGaussianSplatSceneProxy(const UEver
 		{
 			FRayTracingGeometryInitializer Initializer;
 			Initializer.DebugName = DebugName;
-			Initializer.IndexBuffer = m_quadIndexBuffer.IndexBufferRHI;
-			Initializer.TotalPrimitiveCount = m_quadIndexBuffer.Indices.Num() - 2; // triangle strips
+			Initializer.IndexBuffer = m_vertexFactory.GetIndexBufferRHI();
+			Initializer.TotalPrimitiveCount = m_vertexFactory.GetNumOfIndices() - 2;
 			Initializer.GeometryType = RTGT_Triangles;
 			Initializer.bFastBuild = true;
 			Initializer.bAllowUpdate = false;
@@ -60,10 +61,10 @@ FEvercoastGaussianSplatSceneProxy::FEvercoastGaussianSplatSceneProxy(const UEver
 #endif
 
 			FRayTracingGeometrySegment Segment;
-			Segment.VertexBuffer = m_quadVertexBuffers.PositionVertexBuffer.VertexBufferRHI;
+			Segment.VertexBuffer = m_vertexFactory.GetVertexBufferRHI(); 
 			Segment.NumPrimitives = RayTracingGeometry.Initializer.TotalPrimitiveCount;
 #if ENGINE_MAJOR_VERSION == 5
-			Segment.MaxVertices = m_quadVertexBuffers.PositionVertexBuffer.GetNumVertices();
+			Segment.MaxVertices = m_vertexFactory.GetNumOfVertices();
 #endif
 			RayTracingGeometry.Initializer.Segments.Add(Segment);
 
@@ -85,20 +86,13 @@ FEvercoastGaussianSplatSceneProxy::~FEvercoastGaussianSplatSceneProxy()
 	m_tileRenderer->Destroy();
 	m_tileRenderer = nullptr;
 #endif
+
+	m_offscreenQuadRenderer->Destroy();
+	m_offscreenQuadRenderer = nullptr;
+
 	if (m_vertexFactory.IsInitialized())
 		m_vertexFactory.ReleaseResource();
 
-	if (m_quadVertexBuffers.StaticMeshVertexBuffer.IsInitialized())
-		m_quadVertexBuffers.StaticMeshVertexBuffer.ReleaseResource();
-
-	if (m_quadVertexBuffers.PositionVertexBuffer.IsInitialized())
-		m_quadVertexBuffers.PositionVertexBuffer.ReleaseResource();
-
-	if (m_quadVertexBuffers.ColorVertexBuffer.IsInitialized())
-		m_quadVertexBuffers.ColorVertexBuffer.ReleaseResource();
-
-	if (m_quadIndexBuffer.IsInitialized())
-		m_quadIndexBuffer.ReleaseResource();
 
 #if RHI_RAYTRACING
 	if (IsRayTracingEnabled())
@@ -114,51 +108,6 @@ SIZE_T FEvercoastGaussianSplatSceneProxy::GetTypeHash() const
 	// Seems like a best-practice thing for SceneProxy subclasses
 	static size_t UniquePointer;
 	return reinterpret_cast<size_t>(&UniquePointer);
-}
-
-
-void FEvercoastGaussianSplatSceneProxy::InitialiseQuadMesh()
-{
-	TArray<FDynamicMeshVertex> OutVerts;
-
-	// Calculate verts for a face pointing down Z
-	FVector3f Positions[4] =
-	{
-		FVector3f(-1.0, 0, -1.0),
-		FVector3f(+1.0, 0, -1.0),
-		FVector3f(-1.0, 0, +1.0),
-		FVector3f(+1.0, 0, +1.0)
-	};
-	FVector2D UV0s[4] =
-	{
-		FVector2D(0,1),
-		FVector2D(1,1),
-		FVector2D(0,0),
-		FVector2D(1,0),
-	};
-
-	// FDynamicMeshVertex should have 8 texcoord slots and automatically filled with UVs
-	FDynamicMeshVertex Vertices[4];
-	for (int32 VertexIndex = 0; VertexIndex < 4; VertexIndex++)
-	{
-		
-		Vertices[VertexIndex] = FDynamicMeshVertex(
-			Positions[VertexIndex] * 2.0f,
-			FVector3f(1, 0, 0), // tangent x
-			FVector3f(0, 0, 1), // tangent z
-			FVector2f(UV0s[VertexIndex].X, UV0s[VertexIndex].Y),
-			FColor::White
-		);
-
-		OutVerts.Add(Vertices[VertexIndex]);
-		m_quadIndexBuffer.Indices.Add(VertexIndex);
-	}
-
-	
-	// Specify 4 sets of texcoord, 2 for conic data, 2 for mean position in world space
-	m_quadVertexBuffers.InitFromDynamicVertex(&m_vertexFactory, OutVerts, 4);
-
-	BeginInitResource(&m_quadIndexBuffer);
 }
 
 
@@ -189,6 +138,31 @@ const FViewMatrices& FEvercoastGaussianSplatSceneProxy::ExtractRelevantViewMatri
 bool FEvercoastGaussianSplatSceneProxy::ShouldSubmitDynamicMesh(const FSceneView* pView) const
 {
 	return true;
+}
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >=4
+void FEvercoastGaussianSplatSceneProxy::CreateRenderThreadResources(FRHICommandListBase& RHICmdList)
+#else
+void FEvercoastGaussianSplatSceneProxy::CreateRenderThreadResources()
+#endif
+{
+	if (!m_vertexFactory.IsInitialized())
+	{
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >=4
+        m_vertexFactory.InitResource(RHICmdList);
+#else
+        m_vertexFactory.InitResource();
+#endif
+	}
+	else
+	{
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >=4
+        m_vertexFactory.UpdateRHI(RHICmdList);
+#else
+        m_vertexFactory.UpdateRHI();
+#endif
+	}
+
 }
 
 void FEvercoastGaussianSplatSceneProxy::SaveEssentialReconData(const FMatrix& ObjectToWorld, const FMatrix& InView, const FMatrix& InProj, 
@@ -224,9 +198,14 @@ void FEvercoastGaussianSplatSceneProxy::PerformLateComputeShaderSplatRecon()
 			SavedObjectToWorld, SavedView, SavedProj, SavedCameraPositionWS, SavedScreenParam, SavedIsShadowPass, SavedDecimation, SavedSplatExtraScale, SavedCov2DSqrtKernelSize,
 			SavedShowSHColour[0], SavedShowSHColour[1], SavedShowSHColour[2], SavedShowSHColour[3], SavedEncodedGaussian);
 	}
-	else
+	else if (m_rendererType == EGaussianSplatRendererType::TILE_RENDERER)
 	{
 		PerformDataReconForTileRenderer(SavedObjectToWorld, SavedView, SavedProj, SavedCameraPositionWS, SavedScreenParam, SavedCov2DSqrtKernelSize,
+			SavedShowSHColour[0], SavedShowSHColour[1], SavedShowSHColour[2], SavedShowSHColour[3], SavedDepthOutputThreshold, SavedEncodedGaussian);
+	}
+	else if (m_rendererType == EGaussianSplatRendererType::OFFSCREEN_QUAD_RENDERER)
+	{
+		PerformDataReconForOffscreenQuadRenderer(SavedObjectToWorld, SavedView, SavedProj, SavedCameraPositionWS, SavedScreenParam, SavedSplatExtraScale, SavedCov2DSqrtKernelSize,
 			SavedShowSHColour[0], SavedShowSHColour[1], SavedShowSHColour[2], SavedShowSHColour[3], SavedDepthOutputThreshold, SavedEncodedGaussian);
 	}
 }
@@ -255,9 +234,37 @@ void FEvercoastGaussianSplatSceneProxy::PerformDataReconForTileRenderer(const FM
 	UGaussianSplatCompositeSubsystem* gsComposite = GEngine->GetEngineSubsystem<UGaussianSplatCompositeSubsystem>();
 	FVector WorldPos = FVector(InObjectToWorld.M[3][0], InObjectToWorld.M[3][1], InObjectToWorld.M[3][2]);
 
-	gsComposite->CompositeSceneViewExtension->RegisterTileRenderer(m_tileRenderer, WorldPos, m_tileRendererDepthWrite, (uint8)m_tileRendererHookStage, m_tileRenderer->GetOutputFrameCounter());
+	gsComposite->CompositeSceneViewExtension->RegisterTileRenderer(m_tileRenderer, WorldPos, m_tileRendererDepthWrite, (uint8)m_tileRendererHookStage);
 
 #endif
+}
+
+void FEvercoastGaussianSplatSceneProxy::PerformDataReconForOffscreenQuadRenderer(const FMatrix& InObjectToWorld, const FMatrix& InView, const FMatrix& InProj,
+	const FVector& InCameraPositionWS, const FVector4& InScreenParam, float InExtraSplatScale, float InCov2DSqrtKernelSize,
+	bool showSH0Colour, bool showSH1Colour, bool showSH2Colour, bool showSH3Colour, const FVector4& InDepthOutputThreshold,
+	std::shared_ptr<const EvercoastGaussianSplatCSResult> encodedGaussian) const
+{
+	check(m_offscreenQuadRenderer);
+	check(m_rendererType == EGaussianSplatRendererType::OFFSCREEN_QUAD_RENDERER);
+
+	FVector4 DepthOutputAlphaCutout = InDepthOutputThreshold;
+	if (m_tileRendererDepthWrite)
+	{
+		DepthOutputAlphaCutout.X = 1.0;
+	}
+	else
+	{
+		DepthOutputAlphaCutout.X = 0;
+	}
+
+	m_offscreenQuadRenderer->SaveInput(InObjectToWorld, InView, InProj, InCameraPositionWS, InScreenParam, InExtraSplatScale, InCov2DSqrtKernelSize,
+		showSH0Colour, showSH1Colour, showSH2Colour, showSH3Colour, DepthOutputAlphaCutout, encodedGaussian);
+
+	UGaussianSplatCompositeSubsystem* gsComposite = GEngine->GetEngineSubsystem<UGaussianSplatCompositeSubsystem>();
+	FVector WorldPos = FVector(InObjectToWorld.M[3][0], InObjectToWorld.M[3][1], InObjectToWorld.M[3][2]);
+
+	gsComposite->CompositeSceneViewExtension->RegisterOffscreenQuadRenderer(m_offscreenQuadRenderer, WorldPos, m_tileRendererDepthWrite, (uint8)m_tileRendererHookStage);
+
 }
 
 void FEvercoastGaussianSplatSceneProxy::GetDynamicMeshElements(
@@ -326,17 +333,22 @@ void FEvercoastGaussianSplatSceneProxy::GetDynamicMeshElements(
 					m_vertexFactory.PerformComputeShaderSplatDataReconForQuadRenderer(ObjectToWorld, ViewMatrix, ProjMatrix, pView->ViewLocation, ScreenParams, bIsRenderingShadow, m_splatDecimation, m_splatExtraScale, m_cov2DSqrtKernelSize,
 						m_splatShowDiffuse, m_splatShowSH1, m_splatShowSH2, m_splatShowSH3, m_encodedGaussian);
 				}
-				else
+				else if (m_rendererType == EGaussianSplatRendererType::TILE_RENDERER)
 				{
 					// Tile renderer
 					PerformDataReconForTileRenderer(ObjectToWorld, ViewMatrix, ProjMatrix, pView->ViewLocation, ScreenParams, m_cov2DSqrtKernelSize,
+						m_splatShowDiffuse, m_splatShowSH1, m_splatShowSH2, m_splatShowSH3, m_depthOutputThreshold, m_encodedGaussian);
+				}
+				else if (m_rendererType == EGaussianSplatRendererType::OFFSCREEN_QUAD_RENDERER)
+				{
+					PerformDataReconForOffscreenQuadRenderer(ObjectToWorld, ViewMatrix, ProjMatrix, pView->ViewLocation, ScreenParams, m_splatExtraScale, m_cov2DSqrtKernelSize, 
 						m_splatShowDiffuse, m_splatShowSH1, m_splatShowSH2, m_splatShowSH3, m_depthOutputThreshold, m_encodedGaussian);
 				}
 			}
 
 			FMeshBatch& Mesh = Collector.AllocateMesh();
 			FMeshBatchElement& BatchElement = Mesh.Elements[0];
-			BatchElement.IndexBuffer = &m_quadIndexBuffer;	// assign index buffer
+			BatchElement.IndexBuffer = m_vertexFactory.GetIndexBufferPtr();
 
 			Mesh.bWireframe = bWireframe;
 			Mesh.CastShadow = true;
@@ -366,10 +378,10 @@ void FEvercoastGaussianSplatSceneProxy::GetDynamicMeshElements(
 			BatchElement.PrimitiveIdMode = PrimID_ForceZero;
 
 			BatchElement.FirstIndex = 0;
-			BatchElement.NumPrimitives = m_quadIndexBuffer.Indices.Num() - 2;
+			BatchElement.NumPrimitives = m_vertexFactory.GetNumOfIndices() - 2;
 			BatchElement.BaseVertexIndex = 0;
 			BatchElement.MinVertexIndex = 0;
-			BatchElement.MaxVertexIndex = m_quadVertexBuffers.PositionVertexBuffer.GetNumVertices() - 1;
+			BatchElement.MaxVertexIndex = m_vertexFactory.GetNumOfVertices() - 1;
 			BatchElement.NumInstances = m_vertexFactory.GetCurrentReconstructedNumSplats();
 			Mesh.ReverseCulling = !IsLocalToWorldDeterminantNegative();
 			Mesh.Type = PT_TriangleStrip;
@@ -414,7 +426,7 @@ void FEvercoastGaussianSplatSceneProxy::GetDynamicRayTracingInstances(FRayTracin
 		MeshBatch.CastRayTracedShadow = IsShadowCast(Collector.GetReferenceView());
 
 		FMeshBatchElement& BatchElement = MeshBatch.Elements[0];
-		BatchElement.IndexBuffer = &m_quadIndexBuffer;
+		BatchElement.IndexBuffer = m_vertexFactory.GetIndexBufferPtr();
 
 		bool bHasPrecomputedVolumetricLightmap;
 		FMatrix PreviousLocalToWorld;
@@ -428,9 +440,9 @@ void FEvercoastGaussianSplatSceneProxy::GetDynamicRayTracingInstances(FRayTracin
 		BatchElement.PrimitiveUniformBufferResource = &DynamicPrimitiveUniformBuffer.UniformBuffer;
 
 		BatchElement.FirstIndex = 0;
-		BatchElement.NumPrimitives = m_quadIndexBuffer.Indices.Num() - 2;
+		BatchElement.NumPrimitives = m_vertexFactory.GetNumOfIndices() - 2;
 		BatchElement.MinVertexIndex = 0;
-		BatchElement.MaxVertexIndex = m_quadVertexBuffers.PositionVertexBuffer.GetNumVertices() - 1;
+		BatchElement.MaxVertexIndex = m_vertexFactory.GetNumOfVertices() - 1;
 		BatchElement.NumInstances = m_vertexFactory.GetCurrentReconstructedNumSplats(); // splat count
 
 		RayTracingInstance.Materials.Add(MeshBatch);
@@ -468,7 +480,7 @@ void FEvercoastGaussianSplatSceneProxy::GetDynamicRayTracingInstances(FRayTracin
 		MeshBatch.CastRayTracedShadow = IsShadowCast(Context.ReferenceView);
 
 		FMeshBatchElement& BatchElement = MeshBatch.Elements[0];
-		BatchElement.IndexBuffer = &m_quadIndexBuffer;
+		BatchElement.IndexBuffer = m_vertexFactory.GetIndexBufferPtr();
 
 		bool bHasPrecomputedVolumetricLightmap;
 		FMatrix PreviousLocalToWorld;
@@ -492,9 +504,9 @@ void FEvercoastGaussianSplatSceneProxy::GetDynamicRayTracingInstances(FRayTracin
 		BatchElement.PrimitiveUniformBufferResource = &DynamicPrimitiveUniformBuffer.UniformBuffer;
 
 		BatchElement.FirstIndex = 0;
-		BatchElement.NumPrimitives = m_quadIndexBuffer.Indices.Num() - 2;
+		BatchElement.NumPrimitives = m_vertexFactory.GetNumOfIndices() - 2;
 		BatchElement.MinVertexIndex = 0;
-		BatchElement.MaxVertexIndex = m_quadVertexBuffers.PositionVertexBuffer.GetNumVertices() - 1;
+		BatchElement.MaxVertexIndex = m_vertexFactory.GetNumOfVertices() - 1;
 		BatchElement.NumInstances = m_vertexFactory.GetCurrentReconstructedNumSplats(); // splat count
 
 		RayTracingInstance.Materials.Add(MeshBatch);
@@ -542,11 +554,6 @@ void FEvercoastGaussianSplatSceneProxy::SetCov2DSqrtKernelSize(float kernelSize)
 	m_cov2DSqrtKernelSize = kernelSize;
 }
 
-void FEvercoastGaussianSplatSceneProxy::SetShadowBlobScale(float scale)
-{
-	m_vertexFactory.SetShadowBlobScale(scale);
-}
-
 void FEvercoastGaussianSplatSceneProxy::SetShowSphericalHarmonics0(bool show)
 {
 	m_splatShowDiffuse = show;
@@ -572,7 +579,15 @@ void FEvercoastGaussianSplatSceneProxy::SetRendererType(EGaussianSplatRendererTy
 #if PLATFORM_WINDOWS
 	m_rendererType = newType;
 #else
-	m_rendererType = EGaussianSplatRendererType::QUAD_RENDERER;
+	if (newType == EGaussianSplatRendererType::TILE_RENDERER)
+	{
+		// force to offscreen quad renderer if TILE_RENDERER is specified
+		m_rendererType = EGaussianSplatRendererType::OFFSCREEN_QUAD_RENDERER;
+	}
+	else
+	{
+		m_rendererType = newType;
+	}
 #endif
 }
 

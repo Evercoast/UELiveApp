@@ -1,0 +1,387 @@
+// Boilplate copied from PointCloudVertexFactory.usf
+
+/*====================================================================================================================
+	PointCloudVertexFactory.usf: Vertex factory for point clouds. Based upon vector field visualization vertex factory.
+ 		There are no vertices used, just indices. Vertex positions are calculated based on vertex id and the point
+ 		cloud location buffer. Optionally, supports per point colors using another manual fetch stream. Otherwise, it
+ 		used the component's color setting for all points
+=====================================================================================================================*/
+
+#include "/Engine/Private/VertexFactoryCommon.ush"
+
+#include "GaussianSplatTypes.ush"
+
+// Input
+StructuredBuffer<SplatViewData> _SplatViewData;
+ByteAddressBuffer _SortValueFinal; // corresponds to _SortValueList from compute shader
+
+
+/**
+ * Vertex attributes to fetch.
+ */
+struct FVertexFactoryInput
+{
+    float4 Position : ATTRIBUTE0;
+	/** Unique vertex ID. */
+    uint VertexId : SV_VertexID; // TODO: remove if possible
+	/** This doesn't use instancing */
+    uint InstanceId : SV_InstanceID;
+};
+
+/**
+ * Attributes to interpolate from the vertex shader to the pixel shader.
+ */
+struct FVertexFactoryInterpolantsVSToPS
+{
+    // Transfer data from FVertexFactoryIntermediates, need to move this data to material editor
+    float2 ConicAlpha_XY : TEXCOORD0;
+    float2 ConicAlpha_ZW : TEXCOORD1;
+	// Transfer data from FVertexFactoryIntermediates, need to move this data to material editor
+    float2 SplatMeanWorldPosition_XY : TEXCOORD2;
+    float2 SplatMeanWorldPosition_ZZ : TEXCOORD3;
+
+    half4 Color : COLOR0;
+
+#if INSTANCED_STEREO
+	nointerpolation uint PackedEyeIndex : PACKED_EYE_INDEX;
+#endif
+};
+
+/**
+ * Intermediate values computed in the vertex shader.
+ */
+struct FVertexFactoryIntermediates
+{
+    /** The position of the splat in local space(means). */
+    float3 SplatLocalPosition;
+	/** The position of the quad vertex in local space. */
+    float3 QuadVertexLocalPosition;
+	// Need to move this data to material editor
+    float4 ConicAlpha;
+	// Need to move this data to material editor
+    float3 SplatMeanWorldPosition;
+	/** The quad tangent in world space (+V). */
+    float3 TangentUp;
+	/** The quad tangent in world space (+U). */
+    float3 TangentRight;
+    /** The quad's normal in world space */
+    float3 TangentNormal;
+    
+	/** The color of the splat. */
+    half4 Color;
+	/** Cached primitive and instance data */
+    FSceneDataIntermediates SceneData;
+};
+
+
+struct SplatWorldView
+{
+    float4 SplatWorldPosition;
+    float4 SplatViewPosition;
+    float4 SplatClipPosition;
+    float3 SplatMeanWorldPosition;
+    float3x3 SplatTangentToLocal;
+    float3x3 SplatTangentToWorld;
+    float SplatTangentToWorldSign;
+    float3 SplatTangentUp;
+    float3 SplatTangentRight;
+};
+
+float3x3 CalcTangentBasis(float3 TangentRight, float3 TangentUp)
+{
+	// Using camera facing TangentX and TangentY.  The resulting tangent basis is not orthonormal with anything other than ENM_CameraFacing, 
+	// So there are artifacts with tangent space calculations like the TransformVector node,
+	// But this allows lighting based on a world space shape via the normal while still having normal maps camera aligned.
+
+    float3x3 Result;
+    Result[0] = TangentRight; // X
+    Result[2] = TangentUp; // Z
+    Result[1] = normalize(cross(Result[0], Result[2])); // Y
+    return Result;
+}
+
+SplatWorldView CalcSplatVertexWorldView(float3 SplatLocalPosition, float3 QuadVertexLocalPosition, SplatViewData SplatView)
+{
+    SplatWorldView Result = (SplatWorldView) 0;
+
+    float3 TangentRight, TangentUp;
+
+    float4 SplatWorldPosition = TransformLocalToTranslatedWorld(SplatLocalPosition.xyz);
+    Result.SplatMeanWorldPosition = SplatWorldPosition.xyz;
+    
+    float4 SplatViewPosition = mul(SplatWorldPosition, ResolvedView.TranslatedWorldToView);
+	
+	// Covariance calculation happened in clip space
+    float4 SplatClipPosition = mul(SplatWorldPosition, ResolvedView.TranslatedWorldToClip);
+    float3 quadLocalPosition = QuadVertexLocalPosition.xyz;
+
+	// Calc clip space offset using axis1 and axis2
+	// NOTE: the quad defined in SceneProxy is using FRU coordinate system(left handed, x forward & Z up)
+    SplatClipPosition.xy += (quadLocalPosition.x * SplatView.axis1 + quadLocalPosition.z * SplatView.axis2);
+
+	// Also change TangentRight and TangentUp to be normalized SplatView.axis1 and SplatView.axis2 in world space
+    TangentRight = mul(float3(SplatView.axis1.xy, 0.0), (float3x3) ResolvedView.ClipToTranslatedWorld);
+    TangentRight = normalize(TangentRight);
+    TangentUp = mul(float3(SplatView.axis2.xy, 0.0), (float3x3) ResolvedView.ClipToTranslatedWorld);
+    TangentUp = normalize(TangentUp);
+
+	// Back to world space(for the vertex, not to be confused with mean)
+    SplatWorldPosition = mul(SplatClipPosition, ResolvedView.ClipToTranslatedWorld);
+
+
+    Result.SplatWorldPosition = SplatWorldPosition;
+    Result.SplatViewPosition = SplatViewPosition;
+    Result.SplatClipPosition = mul(SplatWorldPosition, ResolvedView.TranslatedWorldToClip);
+
+    float3x3 TangentToLocal = CalcTangentBasis(TangentRight, TangentUp);
+
+    Result.SplatTangentToLocal = TangentToLocal;
+    Result.SplatTangentToWorld = TangentToLocal;
+    Result.SplatTangentToWorldSign = sign(determinant(Result.SplatTangentToWorld));
+    
+    Result.SplatTangentUp = TangentUp;
+    Result.SplatTangentRight = TangentRight;
+
+    return Result;
+}
+
+// Assume inst_id < _NumSplats, this is the main interface to retrieve sorted SplatView
+SplatViewData GetSortedSplatView(uint inst_id)
+{
+    if (inst_id >= _NumSplats)
+        return (SplatViewData)0;
+            
+    uint sortedId = _SortValueFinal.Load(inst_id * 4);
+        
+    if (sortedId >= _NumSplats)
+        return (SplatViewData)0;
+            
+    return _SplatViewData[sortedId];
+}
+
+float4 GetSplatLocalPosition(FVertexFactoryInput Input)
+{
+    uint inst_id = GetInstanceId(Input.InstanceId);
+    if (inst_id >= _NumSplats)
+        return float4(0, 0, 0, 0);
+
+    SplatViewData splatView = GetSortedSplatView(inst_id);
+    return float4(splatView.pos.xyz, 1.0);
+}
+
+SplatViewData GetSplatView(FVertexFactoryInput Input)
+{
+    uint inst_id = GetInstanceId(Input.InstanceId);
+    if (inst_id >= _NumSplats)
+        return (SplatViewData) 0;
+
+    return GetSortedSplatView(inst_id);
+}
+
+FPrimitiveSceneData GetPrimitiveData(FVertexFactoryIntermediates Intermediates)
+{
+    return Intermediates.SceneData.Primitive;
+}
+
+float3 SafeNormalize(float3 V)
+{
+    return V * rsqrt(max(dot(V, V), 0.00000001));
+}
+
+
+/**
+ * Computes intermediates for the given vertex.
+ *
+ * @param Input - Vertex attributes.
+ *
+ * @returns the computed intermediate values.
+ */
+FVertexFactoryIntermediates GetVertexFactoryIntermediates(FVertexFactoryInput Input)
+{
+    FVertexFactoryIntermediates Intermediates = (FVertexFactoryIntermediates) 0;
+    Intermediates.SceneData = VF_GPUSCENE_GET_INTERMEDIATES(Input);
+    
+    uint inst_id = GetInstanceId(Input.InstanceId);
+    if (inst_id >= _NumSplats)
+        return Intermediates;
+
+    SplatViewData splatView = GetSortedSplatView(inst_id);
+    Intermediates.Color.rgba = splatView.diffuse_opacity;
+	
+	// swap y<->z already been done in compute shader
+    float3 splatViewPos = splatView.pos.xyz;
+	// splat local pos
+    Intermediates.SplatLocalPosition = splatViewPos;
+	// quad local vertex pos
+    Intermediates.QuadVertexLocalPosition = Input.Position.xyz;
+    // Propagate conic data
+    Intermediates.ConicAlpha = splatView.conic;
+
+    SplatWorldView splatWorldView = CalcSplatVertexWorldView(Intermediates.SplatLocalPosition, Intermediates.QuadVertexLocalPosition.xyz, splatView);
+    // NB: this SplatMeanWorldPosition is *translated* world position(aka camera relative world position in LWC), it needs to be transformed to *absolute*
+    // world position before use
+    Intermediates.SplatMeanWorldPosition = splatWorldView.SplatMeanWorldPosition;
+    Intermediates.TangentRight = splatWorldView.SplatTangentRight;
+    Intermediates.TangentUp = splatWorldView.SplatTangentUp;
+    Intermediates.TangentNormal = normalize(cross(Intermediates.TangentRight, Intermediates.TangentUp));
+    
+
+    return Intermediates;
+}
+
+/**
+ * Computes material parameterss for a given pixel.
+ *
+ * @param Interpolants - Attributes interpolated from the vertex shader.
+ *
+ * @returns per-pixel material parameters.
+ */
+FMaterialPixelParameters GetMaterialPixelParameters(FVertexFactoryInterpolantsVSToPS Interpolants, float4 SvPosition)
+{
+	// GetMaterialPixelParameters is responsible for fully initializing the result
+    FMaterialPixelParameters Result = MakeInitializedMaterialPixelParameters();
+
+    // Pass the data onto texcoords
+    #if NUM_MATERIAL_TEXCOORDS
+		#if NUM_MATERIAL_TEXCOORDS > 0
+			Result.TexCoords[0] = Interpolants.ConicAlpha_XY;
+		#endif
+		#if NUM_MATERIAL_TEXCOORDS > 1
+			Result.TexCoords[1] = Interpolants.ConicAlpha_ZW;
+		#endif
+		#if NUM_MATERIAL_TEXCOORDS > 2
+			Result.TexCoords[2] = Interpolants.SplatMeanWorldPosition_XY;
+		#endif
+		#if NUM_MATERIAL_TEXCOORDS > 3
+			Result.TexCoords[3] = Interpolants.SplatMeanWorldPosition_ZZ;
+		#endif
+	#endif
+
+    Result.VertexColor = Interpolants.Color;
+
+    Result.TwoSidedSign = 1;
+    return Result;
+}
+
+/**
+ * Computes material parameters for a given vertex.
+ *
+ * @param Input - Attributes for this vertex.
+ * @param Intermediates - Intermediates computed for this vertex.
+ * @param WorldPosition - The position of this vertex in world space.
+ * @param TangentToLocal - The tangent basis for this vertex.
+ *
+ * @returns per-vertex material parameters.
+ */
+FMaterialVertexParameters GetMaterialVertexParameters(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates, float3 WorldPosition, float3x3 TangentToLocal)
+{
+    FMaterialVertexParameters Result = (FMaterialVertexParameters) 0;
+    Result.SceneData = Intermediates.SceneData;
+    Result.WorldPosition = WorldPosition;
+    Result.VertexColor = Intermediates.Color;
+    Result.TangentToWorld = mul(TangentToLocal, GetLocalToWorld3x3());
+    Result.PrevFrameLocalToWorld = GetPrimitiveDataFromUniformBuffer().LocalToWorld;
+    
+    
+    return Result;
+}
+
+/**
+ * Computes the world space position of this vertex.
+ *
+ * @param Input - Vertex attributes.
+ * @param Intermediates - Intermediates computed for this vertex.
+ *
+ * @returns the position of this vertex in world space.
+ */
+float4 VertexFactoryGetWorldPosition(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates)
+{
+    SplatViewData SplatView = GetSplatView(Input);
+    SplatWorldView splatWorldView = CalcSplatVertexWorldView(Intermediates.SplatLocalPosition, Intermediates.QuadVertexLocalPosition.xyz, SplatView);
+    // NB: this world position is *translated* world position(camera relative world position in LWC)
+    return splatWorldView.SplatWorldPosition;
+}
+
+float4 VertexFactoryGetRasterizedWorldPosition(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates, float4 TranslatedWorldPosition)
+{
+    return TranslatedWorldPosition;
+}
+
+float3 VertexFactoryGetPositionForVertexLighting(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates, float3 TranslatedWorldPosition)
+{
+    return TranslatedWorldPosition;
+}
+
+/**
+ * Constructs values that need to be interpolated from the vertex shader to the pixel shader.
+ *
+ * @param Input - Vertex attributes.
+ * @param Intermediates - Intermediates computed for this vertex.
+ *
+ * @returns interpolants.
+ */
+FVertexFactoryInterpolantsVSToPS VertexFactoryGetInterpolantsVSToPS(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates, FMaterialVertexParameters VertexParameters)
+{
+    // Pass the data onto interpolants
+    FVertexFactoryInterpolantsVSToPS Interpolants;
+    Interpolants.ConicAlpha_XY = Intermediates.ConicAlpha.xy;
+    Interpolants.ConicAlpha_ZW = Intermediates.ConicAlpha.zw;
+    Interpolants.SplatMeanWorldPosition_XY= Intermediates.SplatMeanWorldPosition.xy;
+    Interpolants.SplatMeanWorldPosition_ZZ = Intermediates.SplatMeanWorldPosition.zz;
+    Interpolants.Color = Intermediates.Color;
+
+#if INSTANCED_STEREO
+	Interpolants.PackedEyeIndex = 0;
+#endif
+
+    return Interpolants;
+}
+
+/**
+ * Computes the position of this vertex last frame in world space.
+ *
+ * @param Input - Vertex attributes.
+ * @param Intermediates - Intermediates computed for this vertex.
+ *
+ * @returns the previous position of this vertex in world space.
+ */
+float4 VertexFactoryGetPreviousWorldPosition(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates)
+{
+    return VertexFactoryGetWorldPosition(Input, Intermediates);
+}
+
+/**
+ * Computes the tangent basis for this vertex in world space.
+ *
+ * @param Input - Vertex attributes.
+ * @param Intermediates - Intermediates computed for this vertex.
+ *
+ * @returns the tangent basis for this vertex in world space.
+ */
+float3x3 VertexFactoryGetTangentToLocal(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates)
+{
+    float3x3 TangentToLocal;
+    TangentToLocal[0] = Intermediates.TangentRight;
+    TangentToLocal[1] = Intermediates.TangentUp;
+    TangentToLocal[2] = normalize(cross(Intermediates.TangentRight.xyz, Intermediates.TangentUp.xyz));
+    return TangentToLocal;
+}
+
+#if INSTANCED_STEREO
+uint VertexFactoryGetEyeIndex(uint InstanceId)
+{
+	return 0;
+}
+#endif
+
+float4 VertexFactoryGetTranslatedPrimitiveVolumeBounds(FVertexFactoryInterpolantsVSToPS Interpolants)
+{
+    return 0;
+}
+
+float3 VertexFactoryGetWorldNormal(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates)
+{
+    return Intermediates.TangentNormal;
+}
+
+#include "/Engine/Private/VertexFactoryDefaultInterface.ush"

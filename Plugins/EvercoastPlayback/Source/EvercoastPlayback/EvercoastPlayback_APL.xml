@@ -99,5 +99,13 @@
             <copyFile src="$S(PluginDir)/../ThirdParty/picoquic/lib/Android/libpicoquicclient.so"
                               dst="$S(BuildDir)/libs/arm64-v8a/libpicoquicclient.so" />
 
+    <log text="Copying libspz.so"/>
+    <copyFile src="$S(PluginDir)/../ThirdParty/libspz/lib/Android/libspz.so"
+                      dst="$S(BuildDir)/libs/arm64-v8a/libspz.so" />
+
+    <log text="Copying libzstd.so"/>
+    <copyFile src="$S(PluginDir)/../ThirdParty/zstd/lib/Android/libzstd.so"
+                      dst="$S(BuildDir)/libs/arm64-v8a/libzstd.so" />
+
 	</resourceCopies>
 </root>

@@ -399,19 +399,22 @@ public class EvercoastPlayback : ModuleRules
 			throw new EvercoastUnsupportedPlatformException();
 		}
 
-		// Zstd only has windows for now
+		// Zstd has windows/android/mac now
 		PublicIncludePaths.Add(Path.Combine(ThirdPartyRoot, "zstd", "include"));
 		if (Target.Platform == UnrealTargetPlatform.Win64)
 		{
-			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "zstd", "dll", "libzstd.dll.a"));
-			RuntimeDependencies.Add("$(BinaryOutputDir)/libzstd.dll", Path.Combine(ThirdPartyRoot, "zstd", "dll", "libzstd.dll"));
+			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "zstd", "lib", "Win64", "libzstd.dll.a"));
+			RuntimeDependencies.Add("$(BinaryOutputDir)/libzstd.dll", Path.Combine(ThirdPartyRoot, "zstd", "lib", "Win64", "libzstd.dll"));
 		}
-
-		if (Target.Platform == UnrealTargetPlatform.Android)
+		else if (Target.Platform == UnrealTargetPlatform.Android)
+		{
+            PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "zstd", "lib", "Android", "libzstd.so"));
+        }
+        else if (Target.Platform == UnrealTargetPlatform.Mac)
         {
-			string PluginPath = Utils.MakePathRelativeTo(ModuleDirectory, Target.RelativeEnginePath);
-			AdditionalPropertiesForReceipt.Add("AndroidPlugin", Path.Combine(PluginPath, "EvercoastPlayback_APL.xml"));
-		}
+            PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "zstd", "lib", "Mac", "libzstd.1.dylib"));
+            RuntimeDependencies.Add("$(BinaryOutputDir)/libzstd.1.dylib", Path.Combine(ThirdPartyRoot, "zstd", "lib", "Mac", "libzstd.1.dylib"));
+        }
 
 		// Evercoast's modified libspz, compiled from: https://github.com/ye-evercoast/spz/tree/evercoast/zlib_removal
 		PublicIncludePaths.Add(Path.Combine(ThirdPartyRoot, "libspz", "include"));
@@ -420,10 +423,28 @@ public class EvercoastPlayback : ModuleRules
 			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "libspz", "lib", "Win64", "libspz.lib"));
 			RuntimeDependencies.Add("$(BinaryOutputDir)/libspz.dll", Path.Combine(ThirdPartyRoot, "libspz", "lib", "Win64", "libspz.dll"));
 		}
+		else 
+		if (Target.Platform == UnrealTargetPlatform.Android)
+		{
+            PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "libspz", "lib", "Android", "libspz.so"));
+        }
+        else
+        if (Target.Platform == UnrealTargetPlatform.Mac)
+        {
+            PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "libspz", "lib", "Mac", "libspz.dylib"));
+            RuntimeDependencies.Add("$(BinaryOutputDir)/libspz.dylib", Path.Combine(ThirdPartyRoot, "libspz", "lib", "Mac", "libspz.dylib"));
+        }
+
+		// Android APL.xml
+        if (Target.Platform == UnrealTargetPlatform.Android)
+        {
+            string PluginPath = Utils.MakePathRelativeTo(ModuleDirectory, Target.RelativeEnginePath);
+            AdditionalPropertiesForReceipt.Add("AndroidPlugin", Path.Combine(PluginPath, "EvercoastPlayback_APL.xml"));
+        }
 
 
-		// Cooked data path
-		string cookedDataPath = Path.Combine(ProjectRoot, "Content", "EvercoastVolcapSource");
+        // Cooked data path
+        string cookedDataPath = Path.Combine(ProjectRoot, "Content", "EvercoastVolcapSource");
 		if (!Directory.Exists(cookedDataPath))
 		{
 			Directory.CreateDirectory(cookedDataPath);

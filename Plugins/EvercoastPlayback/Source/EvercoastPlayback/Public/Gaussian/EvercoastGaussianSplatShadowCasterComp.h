@@ -26,14 +26,8 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetShadowDecimate, meta = (UIMin = "0.0", UIMax = "1.0"), Category = "Rendering")
     float ShadowDecimate = 0.75f;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetShadowBlobScale, meta = (UIMin = "0.0", UIMax = "2.0"), Category = "Rendering")
-    float ShadowBlobScale = 1.0f;
-
     UFUNCTION(BlueprintSetter)
     void SetShadowDecimate(float InSplatDecimate);
-
-    UFUNCTION(BlueprintSetter)
-    void SetShadowBlobScale(float InBlobScale);
 
     virtual void SetRendererType(EGaussianSplatRendererType rendererType) override;
 

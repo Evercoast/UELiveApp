@@ -6,6 +6,14 @@
 #include "Gaussian/EvercoastGaussianSplatCSRendererComp.h"
 #include "Gaussian/EvercoastGaussianSplatShadowCasterComp.h"
 
+
+#if (PLATFORM_WINDOWS || PLATFORM_ANDROID || PLATFORM_MAC)
+#define GAUSSIAN_SUPPORTED_PLATFORM (1)
+#else
+#define GAUSSIAN_SUPPORTED_PLATFORM (0)
+#endif
+
+
 // Change this type to either UEvercoastVoxelRendererComp or UEvercoastMVFVoxelRendererComp, as well as in the header(UHT forbids me to do both in one place)
 typedef UEvercoastVoxelRendererComp CHOSEN_VOXEL_RENDERER_COMPONENT;
 
@@ -113,7 +121,7 @@ bool UEvercoastRendererSelectorComp::IsUsingGaussianSplatRenderer() const
 	if (!m_currRenderer)
 		return false;
 
-#if PLATFORM_WINDOWS
+#if GAUSSIAN_SUPPORTED_PLATFORM
 	return m_currRenderer->GetClass() == UEvercoastGaussianSplatCSRendererComp::StaticClass();
 #else
 	return false;
@@ -234,7 +242,7 @@ void UEvercoastRendererSelectorComp::ChooseCorrespondingSubRenderer(DecoderType 
 			m_gaussianRenderer->SetVisibility(false, true);
 		}
 	}
-#if PLATFORM_WINDOWS	
+#if GAUSSIAN_SUPPORTED_PLATFORM
 	else if (decoderType == DT_EvercoastSpz || decoderType == DT_GaussianSplatsPLY)
 	{
 		if(!m_gaussianRenderer)

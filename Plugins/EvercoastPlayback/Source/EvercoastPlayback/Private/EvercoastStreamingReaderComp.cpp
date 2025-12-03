@@ -300,6 +300,7 @@ void UEvercoastStreamingReaderComp::CreateReader()
 		m_dataDecoder->ResizeBuffer(2, 1.0 / 30.0); // there's one slot wasted in the ringbuffer so 2
 		// Open file in binary mode, move to end to get size
 		FString pathURL = FString(ECVAsset->GetDataURL());
+        
 
 		bool isRelativePath = FPaths::IsRelative(pathURL);
 		if (isRelativePath)
@@ -309,7 +310,8 @@ void UEvercoastStreamingReaderComp::CreateReader()
 			pathURL = FPaths::ConvertRelativePathToFull(pathURL);
 		}
 
-		std::ifstream file(*pathURL, std::ios::binary | std::ios::ate);
+        std::string StdPath = TCHAR_TO_UTF8(*pathURL);
+		std::ifstream file(StdPath, std::ios::binary | std::ios::ate);
 
 		if (!file) {
 			UE_LOG(EvercoastReaderLog, Error, TEXT("File not found: %s"), *pathURL);
@@ -325,7 +327,7 @@ void UEvercoastStreamingReaderComp::CreateReader()
 		file.seekg(0);
 		if (!file.read(&data[0], data_size)) {
 
-			UE_LOG(EvercoastReaderLog, Error, TEXT("File IO error: %s (%d)"), *pathURL, data_size);
+			UE_LOG(EvercoastReaderLog, Error, TEXT("File IO error: %s %d"), *pathURL, data_size);
 			BypassGhostTreeIO();
 			return;
 		}
