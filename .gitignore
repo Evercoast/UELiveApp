@@ -75,3 +75,6 @@ DerivedDataCache/*
 
 # Developer independent
 Content/Developers/*
+
+# Include everything in 3rd party library folder
+!Plugins/EvercoastPlayback/Source/ThirdParty/**
