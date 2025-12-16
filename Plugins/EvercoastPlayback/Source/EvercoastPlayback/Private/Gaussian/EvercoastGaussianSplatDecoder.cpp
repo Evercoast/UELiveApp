@@ -231,6 +231,7 @@ static std::shared_ptr<EvercoastGaussianSplatCSResult> fillAndPadDataFromRawSPZ(
 
 bool EvercoastGaussianSplatDecoder::DecodeMemoryStreamPLY(const uint8_t* stream, size_t stream_size, double timestamp, int64_t frameIndex, GenericDecodeOption* option)
 {
+#if PLATFORM_WINDOWS |  PLATFORM_MAC | PLATFORM_ANDROID
 	spz::UnpackOptions unpackOption;
 	spz::PackOptions packOption;
 	
@@ -260,38 +261,47 @@ bool EvercoastGaussianSplatDecoder::DecodeMemoryStreamPLY(const uint8_t* stream,
 	m_result = fillAndPadDataFromRawSPZ(rawBytes, timestamp, frameIndex, headerOffset, pointCount, shDegree, positionScalar);
 
 	return true;
+#else
+    // no IOS support yet
+    return false;
+#endif
 }
 
 bool EvercoastGaussianSplatDecoder::DecodeMemoryStreamECSPZ(const uint8_t* stream, size_t stream_size, double timestamp, int64_t frameIndex, GenericDecodeOption* option)
 {
-	size_t headerOffset;
-	uint32_t pointCount, shDegree;
-	float positionScalar;
-	
-
-	auto decompressedSize = ZSTD_getFrameContentSize(stream, stream_size);
-	if (decompressedSize == ZSTD_CONTENTSIZE_ERROR || decompressedSize == ZSTD_CONTENTSIZE_UNKNOWN)
-	{
-		UE_LOG(EvercoastVoxelDecoderLog, Error, TEXT("Getting frame compressed metadata error. Data: %p, Size: %d"), stream, stream_size);
-
-		return false;
-	}
-
-	// protect by smart ptr
-	std::shared_ptr<uint8_t> decompressedMemoryBlock(new uint8_t[decompressedSize], std::default_delete<uint8[]>());
-	uint8_t* rawBytes = decompressedMemoryBlock.get();
-	auto actualDecompressedSize = ZSTD_decompress(rawBytes, decompressedSize, stream, stream_size);
-
-	ECSpzHeader* header = (ECSpzHeader*)rawBytes;
-	if (!parseECSpzHeader(header, &headerOffset, &pointCount, &shDegree, &positionScalar))
-	{
-		return false;
-	}
-
-	uint32_t SHDim = (shDegree + 1) * (shDegree + 1) - 1;
-	m_result = fillAndPadDataFromRawSPZ(rawBytes, timestamp, frameIndex, headerOffset, pointCount, shDegree, positionScalar);
-
-	return true;
+#if PLATFORM_WINDOWS |  PLATFORM_MAC | PLATFORM_ANDROID
+    size_t headerOffset;
+    uint32_t pointCount, shDegree;
+    float positionScalar;
+    
+    
+    auto decompressedSize = ZSTD_getFrameContentSize(stream, stream_size);
+    if (decompressedSize == ZSTD_CONTENTSIZE_ERROR || decompressedSize == ZSTD_CONTENTSIZE_UNKNOWN)
+    {
+        UE_LOG(EvercoastVoxelDecoderLog, Error, TEXT("Getting frame compressed metadata error. Data: %p, Size: %d"), stream, stream_size);
+        
+        return false;
+    }
+    
+    // protect by smart ptr
+    std::shared_ptr<uint8_t> decompressedMemoryBlock(new uint8_t[decompressedSize], std::default_delete<uint8[]>());
+    uint8_t* rawBytes = decompressedMemoryBlock.get();
+    auto actualDecompressedSize = ZSTD_decompress(rawBytes, decompressedSize, stream, stream_size);
+    
+    ECSpzHeader* header = (ECSpzHeader*)rawBytes;
+    if (!parseECSpzHeader(header, &headerOffset, &pointCount, &shDegree, &positionScalar))
+    {
+        return false;
+    }
+    
+    uint32_t SHDim = (shDegree + 1) * (shDegree + 1) - 1;
+    m_result = fillAndPadDataFromRawSPZ(rawBytes, timestamp, frameIndex, headerOffset, pointCount, shDegree, positionScalar);
+    
+    return true;
+#else
+    // no IOS support yet
+    return false;
+#endif
 }
 
 bool EvercoastGaussianSplatDecoder::DecodeMemoryStream(const uint8_t* stream, size_t stream_size, double timestamp, int64_t frameIndex, GenericDecodeOption* option)

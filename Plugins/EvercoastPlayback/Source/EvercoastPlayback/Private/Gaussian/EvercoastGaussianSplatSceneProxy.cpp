@@ -338,11 +338,16 @@ void FEvercoastGaussianSplatSceneProxy::GetDynamicMeshElements(
 					// Tile renderer
 					PerformDataReconForTileRenderer(ObjectToWorld, ViewMatrix, ProjMatrix, pView->ViewLocation, ScreenParams, m_cov2DSqrtKernelSize,
 						m_splatShowDiffuse, m_splatShowSH1, m_splatShowSH2, m_splatShowSH3, m_depthOutputThreshold, m_encodedGaussian);
+					// Do not proceeded with adding non existing mesh to collector
+					continue;
 				}
 				else if (m_rendererType == EGaussianSplatRendererType::OFFSCREEN_QUAD_RENDERER)
 				{
 					PerformDataReconForOffscreenQuadRenderer(ObjectToWorld, ViewMatrix, ProjMatrix, pView->ViewLocation, ScreenParams, m_splatExtraScale, m_cov2DSqrtKernelSize, 
 						m_splatShowDiffuse, m_splatShowSH1, m_splatShowSH2, m_splatShowSH3, m_depthOutputThreshold, m_encodedGaussian);
+
+					// Do not proceeded with adding non existing mesh to collector
+					continue;
 				}
 			}
 

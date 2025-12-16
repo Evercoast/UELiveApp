@@ -1,3 +1,6 @@
+# 0.9.2
+- Support Mac with Gaussian splat rendering
+
 # 0.9.1
 - Improved Gaussian Splat rendering quality along with correct blending with transparent and reflective objects
 - Fixed the scene loading crash issue

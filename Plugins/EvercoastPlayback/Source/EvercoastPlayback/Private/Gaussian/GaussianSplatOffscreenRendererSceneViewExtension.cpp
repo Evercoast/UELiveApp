@@ -586,6 +586,8 @@ void FGaussianSplatOffscreenRendererSceneViewExtension::OnPostOpaqueRender(FPost
 				AddCopyTexturePass(GraphBuilder, OutputTexture, Parameters.ColorTexture);
 			}
 
+			// For deferred renderers only
+#if PLATFORM_WINDOWS || PLATFORM_MAC
 			// NOTE: Even user don't choose to composite image at this stage, we'll need to modify G-buffer here to remove shininess
 			{
 				FRHITexture* inputImageRHITexture = registeredImage->Colour;
@@ -630,6 +632,7 @@ void FGaussianSplatOffscreenRendererSceneViewExtension::OnPostOpaqueRender(FPost
 					);
 				}
 			}
+#endif
 		}
 	}
 }

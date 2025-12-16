@@ -273,7 +273,7 @@ FMaterialPixelParameters GetMaterialPixelParameters(FVertexFactoryInterpolantsVS
  *
  * @returns per-vertex material parameters.
  */
-FMaterialVertexParameters GetMaterialVertexParameters(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates, float3 WorldPosition, float3x3 TangentToLocal)
+FMaterialVertexParameters GetMaterialVertexParameters(FVertexFactoryInput Input, FVertexFactoryIntermediates Intermediates, float3 WorldPosition, float3x3 TangentToLocal, bool bIsPrevFrame = false)
 {
     FMaterialVertexParameters Result = (FMaterialVertexParameters) 0;
     Result.SceneData = Intermediates.SceneData;
