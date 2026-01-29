@@ -62,17 +62,8 @@ public:
 
 		using namespace std::chrono_literals;
 
-#if PLATFORM_MAC && PLATFORM_CPU_ARM_FAMILY
-		while (m_running)
-		{
-			// warn user every 1 sec
-			UE_LOG(EvercoastRealtimeNetworkLog, Error, TEXT("Evercoast Realtime Volcap is not implemented on Mac Silicon"));
-			std::this_thread::sleep_for(1000ms);
-		}
-#else
-
-		
-
+        // Pretend Mac Silicon/Intel are all supported!
+        
 		// Check if plugin module has been initialised
 		while (PicoQuic::create_connection == nullptr || PicoQuic::create_connection_2 == nullptr)
 		{
@@ -264,7 +255,7 @@ public:
 		PicoQuic::delete_connection(geoConn);
 		UE_LOG(EvercoastRealtimeNetworkLog, Log, TEXT("Delete audio connection: %d"), audioConn);
 		PicoQuic::delete_connection(audioConn);
-#endif
+
 		return 0;
 	}
 

@@ -97,114 +97,7 @@ namespace PicoQuic
 
 #elif (PLATFORM_ANDROID || PLATFORM_LINUX || PLATFORM_MAC || PLATFORM_IOS)
 
-
-// There's no picoquic for Mac Silicon yet, but we still need to have the rest of the plugin working so only empty implementation here	
-#if PLATFORM_MAC && PLATFORM_CPU_ARM_FAMILY
-
-	inline vci_connection_handle_t create_connection(const char* server_name, int port, vci_connection_type_t connection_type)
-	{
-		(void)server_name;
-		(void)port;
-		(void)connection_type;
-		return (vci_connection_handle_t)0;
-	}
-
-	inline vci_connection_handle_t create_connection_2(const char* server_name, int port, vci_connection_type_t connection_type, 
-		char* username, char* access_token, const char* ca_crt_path, const char* server_name_indicator)
-	{
-		(void)server_name;
-		(void)port;
-		(void)connection_type;
-		(void)username;
-		(void)access_token;
-		(void)ca_crt_path;
-		(void)server_name_indicator;
-		
-		return (vci_connection_handle_t)0;
-	}
-
-	inline int reconnect(vci_connection_handle_t handle)
-	{
-		(void)handle;
-		return 0;
-	}
-
-	inline void delete_connection(vci_connection_handle_t handle)
-	{
-		(void)handle;
-	}
-
-	inline int get_status(vci_connection_handle_t handle)
-	{
-		(void)handle;
-		return 0;
-	}
-
-	inline int received_frame(vci_connection_handle_t handle)
-	{
-		(void)handle;
-		return 0;
-	}
-
-	inline uint64_t get_data_size(vci_connection_handle_t handle)
-	{
-		(void)handle;
-		return 0;
-	}
-
-	inline uint64_t get_user_data_size(vci_connection_handle_t handle)
-	{
-		(void)handle;
-		return 0;
-	}
-
-	inline uint64_t get_frame_number(vci_connection_handle_t handle)
-	{
-		(void)handle;
-		return 0;
-	}
-
-	inline uint64_t get_timestamp(vci_connection_handle_t handle)
-	{
-		(void)handle;
-		return 0;
-	}
-
-	inline uint64_t get_type_and_flags(vci_connection_handle_t handle)
-	{
-		(void)handle;
-		return 0;
-	}
-
-	inline uint8_t* get_data(vci_connection_handle_t handle)
-	{
-		(void)handle;
-		return nullptr;
-	}
-
-	inline uint8_t* get_user_data(vci_connection_handle_t handle)
-	{
-		(void)handle;
-		return nullptr;
-	}
-
-	inline void pop_frame(vci_connection_handle_t handle)
-	{
-		(void)handle;
-	}
-
-	inline void set_kpi_output(vci_connection_handle_t handle, const char* output_filename)
-	{
-		(void)handle;
-		(void)output_filename;
-	}
-
-	inline void update_framerate(vci_connection_handle_t handle, double fps)
-	{
-		(void)handle;
-		(void)fps;
-	}
-#else
+    // Pretend Mac Silicon/Intel are all supported!
 	inline vci_connection_handle_t create_connection(const char* server_name, int port, vci_connection_type_t connection_type)
 	{
 		return (vci_connection_handle_t)vci_create_connection(server_name, port, (::vci_connection_type_t)connection_type);
@@ -285,7 +178,6 @@ namespace PicoQuic
 	{
 		vci_update_framerate((::vci_connection_handle_t)handle, fps);
 	}
-#endif
 
 #else
 #error PicoQuic unsupported platform!

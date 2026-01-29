@@ -379,6 +379,7 @@ public class EvercoastPlayback : ModuleRules
 		}
 		else if (Target.Platform == UnrealTargetPlatform.Mac)
 		{
+            // Link against silicon dylib, filename might change though
 			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyRoot, "picoquic", "lib", "Mac", "libpicoquicclient.dylib"));
 			RuntimeDependencies.Add("$(BinaryOutputDir)/libpicoquicclient.dylib", Path.Combine(ThirdPartyRoot, "picoquic", "lib", "Mac", "libpicoquicclient.dylib"));
 		}
